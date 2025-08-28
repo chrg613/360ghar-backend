@@ -13,9 +13,18 @@ async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     
     db_visit = Visit(**visit_data)
     db.add(db_visit)
+    # Flush to assign PK, then re-select with eager-loaded relationships
     await db.flush()
-    await db.refresh(db_visit)
-    return db_visit
+    stmt = (
+        select(Visit)
+        .options(
+            selectinload(Visit.property).selectinload(Property.images),
+            selectinload(Visit.property).selectinload(Property.property_amenities),
+        )
+        .where(Visit.id == db_visit.id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one()
 
 async def get_visit(db: AsyncSession, visit_id: int):
     """Get a visit by ID"""
@@ -90,9 +99,19 @@ async def update_visit(db: AsyncSession, visit_id: int, visit_update: VisitUpdat
             setattr(visit, field, value)
         
         await db.flush()
-        await db.refresh(visit)
+        # Re-select with eager-loaded relationships to avoid async lazy-loads during serialization
+        stmt = (
+            select(Visit)
+            .options(
+                selectinload(Visit.property).selectinload(Property.images),
+                selectinload(Visit.property).selectinload(Property.property_amenities),
+            )
+            .where(Visit.id == visit_id)
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
     
-    return visit
+    return None
 
 async def cancel_visit(db: AsyncSession, visit_id: int, reason: str):
     """Cancel a visit"""

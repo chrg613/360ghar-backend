@@ -595,6 +595,72 @@
 					"response": []
 				},
 				{
+					"name": "Search Properties - All Filters",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/v1/properties/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"properties",
+								""
+							],
+							"query": [
+								{ "key": "lat", "value": "28.446400", "description": "Latitude", "disabled": true },
+								{ "key": "lng", "value": "77.011711", "description": "Longitude", "disabled": true },
+								{ "key": "radius", "value": "5", "description": "Search radius in km", "disabled": true },
+
+								{ "key": "q", "value": "luxury apartment", "description": "Text search query", "disabled": true },
+
+								{ "key": "property_type", "value": "apartment", "description": "Property type (multi)", "disabled": true },
+								{ "key": "property_type", "value": "house", "description": "Property type (multi)", "disabled": true },
+								{ "key": "purpose", "value": "rent", "description": "Purpose: buy | rent | short_stay", "disabled": true },
+
+								{ "key": "price_min", "value": "15000", "description": "Minimum price", "disabled": true },
+								{ "key": "price_max", "value": "40000", "description": "Maximum price", "disabled": true },
+
+								{ "key": "bedrooms_min", "value": "1", "description": "Minimum bedrooms", "disabled": true },
+								{ "key": "bedrooms_max", "value": "3", "description": "Maximum bedrooms", "disabled": true },
+								{ "key": "bathrooms_min", "value": "1", "description": "Minimum bathrooms", "disabled": true },
+								{ "key": "bathrooms_max", "value": "3", "description": "Maximum bathrooms", "disabled": true },
+
+								{ "key": "area_min", "value": "800", "description": "Minimum area (sqft)", "disabled": true },
+								{ "key": "area_max", "value": "2500", "description": "Maximum area (sqft)", "disabled": true },
+
+								{ "key": "city", "value": "Gurgaon", "description": "City", "disabled": true },
+								{ "key": "locality", "value": "DLF", "description": "Locality", "disabled": true },
+								{ "key": "pincode", "value": "122002", "description": "Pincode", "disabled": true },
+
+								{ "key": "amenities", "value": "parking", "description": "Amenity (multi)", "disabled": true },
+								{ "key": "amenities", "value": "gym", "description": "Amenity (multi)", "disabled": true },
+								{ "key": "features", "value": "furnished", "description": "Feature (multi)", "disabled": true },
+								{ "key": "features", "value": "pool", "description": "Feature (multi)", "disabled": true },
+
+								{ "key": "parking_spaces_min", "value": "1", "description": "Minimum parking spaces", "disabled": true },
+								{ "key": "floor_number_min", "value": "1", "description": "Minimum floor number", "disabled": true },
+								{ "key": "floor_number_max", "value": "10", "description": "Maximum floor number", "disabled": true },
+								{ "key": "age_max", "value": "10", "description": "Maximum age of property (years)", "disabled": true },
+
+								{ "key": "check_in", "value": "2025-09-01", "description": "Check-in date (YYYY-MM-DD)", "disabled": true },
+								{ "key": "check_out", "value": "2025-09-05", "description": "Check-out date (YYYY-MM-DD)", "disabled": true },
+								{ "key": "guests", "value": "2", "description": "Guest count for short stay", "disabled": true },
+
+								{ "key": "exclude_swiped", "value": "true", "description": "Exclude properties already swiped by current user (auth required)", "disabled": true },
+
+								{ "key": "sort_by", "value": "newest", "description": "Sort by: distance | price_low | price_high | newest | popular | relevance" },
+								{ "key": "page", "value": "1", "description": "Page number" },
+								{ "key": "limit", "value": "20", "description": "Items per page" }
+							]
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Search Properties - Location Based",
 					"event": [
 						{
@@ -1755,6 +1821,72 @@
 									"value": "20",
 									"description": "Number of items per page"
 								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Swipe History - All Filters",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{BASE_URL}}/api/v1/swipes/",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"swipes",
+								""
+							],
+							"query": [
+								{ "key": "lat", "value": "28.446400", "description": "Latitude", "disabled": true },
+								{ "key": "lng", "value": "77.011711", "description": "Longitude", "disabled": true },
+								{ "key": "radius", "value": "5", "description": "Search radius in km", "disabled": true },
+
+								{ "key": "q", "value": "luxury apartment", "description": "Text search query", "disabled": true },
+
+								{ "key": "property_type", "value": "apartment", "description": "Property type (multi)", "disabled": true },
+								{ "key": "property_type", "value": "house", "description": "Property type (multi)", "disabled": true },
+								{ "key": "purpose", "value": "rent", "description": "Purpose: buy | rent | short_stay", "disabled": true },
+
+								{ "key": "price_min", "value": "15000", "description": "Minimum price", "disabled": true },
+								{ "key": "price_max", "value": "40000", "description": "Maximum price", "disabled": true },
+
+								{ "key": "bedrooms_min", "value": "1", "description": "Minimum bedrooms", "disabled": true },
+								{ "key": "bedrooms_max", "value": "3", "description": "Maximum bedrooms", "disabled": true },
+								{ "key": "bathrooms_min", "value": "1", "description": "Minimum bathrooms", "disabled": true },
+								{ "key": "bathrooms_max", "value": "3", "description": "Maximum bathrooms", "disabled": true },
+
+								{ "key": "area_min", "value": "800", "description": "Minimum area (sqft)", "disabled": true },
+								{ "key": "area_max", "value": "2500", "description": "Maximum area (sqft)", "disabled": true },
+
+								{ "key": "city", "value": "Gurgaon", "description": "City", "disabled": true },
+								{ "key": "locality", "value": "DLF", "description": "Locality", "disabled": true },
+								{ "key": "pincode", "value": "122002", "description": "Pincode", "disabled": true },
+
+								{ "key": "amenities", "value": "parking", "description": "Amenity (multi)", "disabled": true },
+								{ "key": "amenities", "value": "gym", "description": "Amenity (multi)", "disabled": true },
+								{ "key": "features", "value": "furnished", "description": "Feature (multi)", "disabled": true },
+								{ "key": "features", "value": "pool", "description": "Feature (multi)", "disabled": true },
+
+								{ "key": "parking_spaces_min", "value": "1", "description": "Minimum parking spaces", "disabled": true },
+								{ "key": "floor_number_min", "value": "1", "description": "Minimum floor number", "disabled": true },
+								{ "key": "floor_number_max", "value": "10", "description": "Maximum floor number", "disabled": true },
+								{ "key": "age_max", "value": "10", "description": "Maximum age of property (years)", "disabled": true },
+
+								{ "key": "check_in", "value": "2025-09-01", "description": "Check-in date (YYYY-MM-DD)", "disabled": true },
+								{ "key": "check_out", "value": "2025-09-05", "description": "Check-out date (YYYY-MM-DD)", "disabled": true },
+								{ "key": "guests", "value": "2", "description": "Guest count for short stay", "disabled": true },
+
+								{ "key": "is_liked", "value": "true", "description": "Filter by liked (true) or disliked (false)", "disabled": true },
+
+								{ "key": "sort_by", "value": "newest", "description": "Sort by: distance | price_low | price_high | newest | popular | relevance" },
+								{ "key": "page", "value": "1", "description": "Page number" },
+								{ "key": "limit", "value": "20", "description": "Items per page" }
 							]
 						}
 					},

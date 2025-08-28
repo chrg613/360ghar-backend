@@ -109,6 +109,30 @@ LOCATIONS = {
             "Near Metro Station", "Near DLF CyberHub", "Near Ambience Mall",
             "Near Medanta Hospital", "Near Rapid Metro", "Near Golf Course"
         ]
+    ),
+    "dabra": LocationData(
+        name="Dabra",
+        latitude=25.8863596,
+        longitude=78.3388375,
+        localities=[
+            "Civil Lines", "Sadar Bazar", "Sikandra Rao", "Nandanpura", "Orchha Gate",
+            "Medical College Area", "Bundelkhand University", "Gwalior Road", "Kanpur Road",
+            "Laxmi Puram", "Prem Nagar", "Shastri Nagar", "Vijay Nagar", "Rajgarh"
+        ],
+        price_per_sqft_range=(2500, 8000),  # INR per sqft
+        currency="INR",
+        popular_amenities=[
+            "Swimming Pool", "Gym", "Parking", "Security", "Power Backup", "Lift", "Garden",
+            "Clubhouse", "Play Area", "CCTV", "Intercom", "Water Supply", "Fire Safety"
+        ],
+        builder_names=[
+            "Bundelkhand Builders", "Jhansi Realty", "Orchha Developers", "Sipri Construction",
+            "Civil Lines Group", "Gwalior Properties", "Nandanpura Builders", "Rajgarh Realty"
+        ],
+        landmarks=[
+            "Near Jhansi Fort", "Near Bundelkhand University", "Near Medical College",
+            "Near Railway Station", "Near Rani Lakshmibai Park", "Near City Mall"
+        ]
     )
 }
 

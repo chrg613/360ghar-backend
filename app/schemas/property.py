@@ -223,6 +223,9 @@ class UnifiedPropertyFilter(BaseModel):
     
     sort_by: Optional[SortBy] = SortBy.distance
     include_unavailable: bool = False
+    # Authentication-aware filters
+    # When true and user is authenticated, excludes properties the user has already swiped
+    exclude_swiped: bool = False
 
 class UnifiedPropertyResponse(BaseModel):
     properties: List[Property]

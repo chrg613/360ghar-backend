@@ -3,6 +3,9 @@ import logging
 import uvicorn
 from app.main import app
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Set up basic logging before uvicorn takes over
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

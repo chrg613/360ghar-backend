@@ -139,7 +139,7 @@ Modern amenities available for a comfortable living experience.
             "longitude": round(longitude, 6),
             "location": location_wkt,
             "city": location.name,
-            "state": "Delhi" if location_key == "us" else ("Maharashtra" if location_key == "mumbai" else "Haryana"),
+            "state": "Delhi" if location_key == "us" else ("Maharashtra" if location_key == "mumbai" else ("Haryana" if location_key == "gurgaon" else "Uttar Pradesh")),
             "country": "USA" if location_key == "us" else "India",
             "pincode": f"{random.randint(100000, 999999)}",
             "locality": locality,

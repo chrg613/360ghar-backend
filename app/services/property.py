@@ -126,7 +126,7 @@ async def get_unified_properties_optimized(
     limit: int
 ):
     """Unified property search with comprehensive filtering and geospatial optimization."""
-    logger.info(f"Searching properties for user {user_id}, page {page}, limit {limit}")
+    logger.info(f"Searching properties for user {user_id}, page {page}, limit {limit}, filters: {filters}")
     
     try:
         skip = (page - 1) * limit
@@ -299,8 +299,8 @@ async def get_unified_properties_optimized(
         # TODO: Implement check-in/check-out date availability filtering
         # This would require checking against booking calendar
         
-        # Exclude properties already swiped by the user if authenticated
-        if user_id:
+        # Optionally exclude properties already swiped by the user if authenticated
+        if user_id and getattr(filters, "exclude_swiped", False):
             from app.models.models import UserSwipe
             swiped_subquery = select(UserSwipe.property_id).where(UserSwipe.user_id == user_id)
             conditions.append(~Property.id.in_(swiped_subquery))

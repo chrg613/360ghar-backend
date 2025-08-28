@@ -87,6 +87,9 @@ async def get_properties_list(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     
+    # Auth-aware filters
+    exclude_swiped: bool = Query(False, description="Exclude properties already swiped by the authenticated user"),
+    
     # Optional authentication
     current_user: Optional[UserSchema] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
@@ -99,7 +102,8 @@ async def get_properties_list(
     - Text search (q parameter)
     - Comprehensive property filtering
     - Multiple sorting options
-    - Optional user authentication (excludes swiped properties if authenticated)
+    - Optional user authentication
+    - Auth-aware filter: exclude swiped properties when `exclude_swiped=true`
     """
     # Build filters
     filters = UnifiedPropertyFilter(
@@ -129,7 +133,8 @@ async def get_properties_list(
         check_in_date=check_in,
         check_out_date=check_out,
         guests=guests,
-        sort_by=sort_by
+        sort_by=sort_by,
+        exclude_swiped=exclude_swiped
     )
     
     # Use user_id if authenticated, otherwise use None
@@ -218,4 +223,3 @@ async def delete_property_endpoint(
         raise HTTPException(status_code=404, detail="Property not found")
     
     return {"message": "Property deleted successfully"}
-
