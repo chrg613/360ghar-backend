@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 from app.core.logging import get_logger
+from fastapi import HTTPException
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,10 @@ async def get_db() -> AsyncSession:
         try:
             yield session
             await session.commit()
+        except HTTPException:
+            # Propagate HTTP errors without logging as DB errors
+            await session.rollback()
+            raise
         except Exception as e:
             logger.error(f"Database session error: {e}")
             await session.rollback()

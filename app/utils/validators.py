@@ -62,14 +62,22 @@ class ValidationUtils:
         if not phone:
             return phone
         
-        # Remove spaces and dashes
+        # Remove spaces, dashes, parentheses
         phone = re.sub(r'[\s\-()]', '', phone)
-        
-        # Add country code if missing (default to India)
+
+        # Convert leading 00 to + (common international prefix)
+        if phone.startswith('00') and not phone.startswith('+'):
+            phone = '+' + phone[2:]
+
+        # Ensure E.164 leading '+' where possible
         if not phone.startswith('+'):
-            if len(phone) == 10:  # Indian mobile number
+            # 10-digit assumed India
+            if len(phone) == 10 and phone.isdigit():
                 phone = f'+91{phone}'
-        
+            # Likely includes country code without '+' (e.g., 91XXXXXXXXXX)
+            elif 11 <= len(phone) <= 15 and phone.isdigit():
+                phone = f'+{phone}'
+
         if not ValidationUtils.PHONE_PATTERN.match(phone):
             raise ValidationException("Invalid phone number format")
         

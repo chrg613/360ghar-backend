@@ -1,11 +1,33 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from typing import Optional, Dict, Any
+from fastapi import HTTPException, status
 from app.models.models import User
 from app.schemas.user import UserUpdate
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+async def get_user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
+    """Fetch a user by phone number, if present.
+
+    Note: Phone numbers are not unique in the schema; this returns the first match
+    if multiple exist. For existence checks, this is sufficient.
+    """
+    logger.debug(f"Fetching user by phone: {phone}")
+    try:
+        stmt = select(User).where(User.phone == phone)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+        if user:
+            logger.debug(f"User found with ID {user.id} for phone {phone}")
+        else:
+            logger.debug(f"No user found with phone {phone}")
+        return user
+    except Exception as e:
+        logger.error(f"Failed to fetch user by phone {phone}: {str(e)}", exc_info=True)
+        raise
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
     logger.debug(f"Fetching user by email: {email}")
@@ -42,31 +64,63 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
     logger.info(f"Getting or creating user from Supabase data for user {supabase_user_data['id']}")
     
     try:
-        user = await get_user_by_supabase_id(db, supabase_user_data["id"])
+        # Normalize incoming fields
+        supabase_id = supabase_user_data.get("id")
+        email = supabase_user_data.get("email") or None  # empty string -> None
+        phone = supabase_user_data.get("phone") or None
+        full_name = (supabase_user_data.get("user_metadata") or {}).get("full_name")
+        is_verified = bool(supabase_user_data.get("email_verified", False))
+
+        user = await get_user_by_supabase_id(db, supabase_id)
         
         if not user:
-            user = await get_user_by_email(db, supabase_user_data["email"])
+            # Only attempt email lookup if an email is present
+            if email:
+                user = await get_user_by_email(db, email)
+            else:
+                user = None
             
             if user:
                 # Update with Supabase ID
                 logger.info(f"Updating existing user {user.id} with Supabase ID")
-                user.supabase_user_id = supabase_user_data["id"]
+                user.supabase_user_id = supabase_id
+                # Optionally backfill missing phone/full_name
+                if phone and not user.phone:
+                    user.phone = phone
+                if full_name and not user.full_name:
+                    user.full_name = full_name
             else:
                 # Create new user
-                logger.info(f"Creating new user from Supabase data: {supabase_user_data['email']}")
+                logger.info(
+                    f"Creating new user from Supabase data: "
+                    f"email={'present' if email else 'none'} phone={'present' if phone else 'none'}"
+                )
                 user = User(
-                    supabase_user_id=supabase_user_data["id"],
-                    email=supabase_user_data["email"],
-                    full_name=supabase_user_data.get("user_metadata", {}).get("full_name"),
-                    phone=supabase_user_data.get("phone"),
+                    supabase_user_id=supabase_id,
+                    email=email,
+                    full_name=full_name,
+                    phone=phone,
                     is_active=True,
-                    is_verified=supabase_user_data.get("email_verified", False)
+                    is_verified=is_verified
                 )
                 db.add(user)
-            
-            await db.flush()
-            await db.refresh(user)
-            logger.info(f"User {'updated' if user.supabase_user_id else 'created'} with ID {user.id}")
+            # Flush with protection against race-condition duplicates on supabase_user_id
+            try:
+                await db.flush()
+            except IntegrityError as ie:
+                logger.warning(
+                    "IntegrityError during user insert/update, attempting to recover by fetching existing user: %s",
+                    str(ie)
+                )
+                await db.rollback()
+                # Another request likely created the user already; fetch and return it
+                user = await get_user_by_supabase_id(db, supabase_id)
+                if not user:
+                    # Re-raise if still not found; something else went wrong
+                    raise
+            else:
+                await db.refresh(user)
+                logger.info(f"User {'updated' if user.supabase_user_id else 'created'} with ID {user.id}")
         else:
             logger.debug(f"User already exists with ID {user.id}")
         
@@ -83,23 +137,66 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
         
-        if user:
-            update_data = user_update.model_dump(exclude_unset=True)
-            logger.debug(f"Updating user {user_id} with fields: {list(update_data.keys())}")
-            
-            for field, value in update_data.items():
-                setattr(user, field, value)
-            
-            await db.flush()
-            await db.refresh(user)
-            logger.info(f"User {user_id} updated successfully")
-        else:
+        if not user:
             logger.warning(f"User {user_id} not found for update")
+            return None
+        
+        update_data = user_update.model_dump(exclude_unset=True)
+        logger.debug(f"Updating user {user_id} with fields: {list(update_data.keys())}")
+        
+        # Handle email update with conflict checking
+        if 'email' in update_data:
+            new_email = update_data['email']
+            
+            # Skip update if email is the same as current
+            if new_email == user.email:
+                logger.debug(f"Email unchanged for user {user_id}, skipping email update")
+                del update_data['email']
+            elif new_email is not None:
+                # Check if email is already taken by another user
+                email_check_stmt = select(User).where(
+                    User.email == new_email, 
+                    User.id != user_id
+                )
+                email_result = await db.execute(email_check_stmt)
+                existing_user = email_result.scalar_one_or_none()
+                
+                if existing_user:
+                    logger.warning(f"Email {new_email} already exists for user {existing_user.id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Email {new_email} is already registered"
+                    )
+        
+        # Apply updates
+        for field, value in update_data.items():
+            setattr(user, field, value)
+        
+        await db.flush()
+        await db.refresh(user)
+        logger.info(f"User {user_id} updated successfully")
         
         return user
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except IntegrityError as e:
+        logger.error(f"Integrity error updating user {user_id}: {str(e)}")
+        if "users_email_key" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email address is already registered"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data integrity constraint violated"
+        )
     except Exception as e:
         logger.error(f"Failed to update user {user_id}: {str(e)}", exc_info=True)
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error occurred while updating user"
+        )
 
 async def update_user_preferences(db: AsyncSession, user_id: int, preferences: dict) -> Optional[User]:
     logger.info(f"Updating preferences for user {user_id}")

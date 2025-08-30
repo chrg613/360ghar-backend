@@ -7,15 +7,24 @@ if TYPE_CHECKING:
     from app.schemas.agent import Agent
 
 class UserBase(BaseModel):
-    email: EmailStr
+    email: Optional[EmailStr] = None
     full_name: Optional[str] = None
     phone: Optional[str] = None
     date_of_birth: Optional[date] = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, v):
+        # Coerce empty strings to None so Optional[EmailStr] passes validation
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 class UserCreate(UserBase):
     password: str
     
 class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
     full_name: Optional[str] = None
     phone: Optional[str] = None
     date_of_birth: Optional[date] = None
@@ -51,16 +60,29 @@ class UserUpdate(BaseModel):
             max_age = 120
             today = date.today()
             age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
-            
+
             if age < min_age:
                 raise ValueError(f"Must be at least {min_age} years old")
             if age > max_age:
                 raise ValueError(f"Invalid date of birth")
         return v
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, v):
+        # Coerce empty strings to None so Optional[EmailStr] passes validation
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
 class UserLogin(BaseModel):
-    email: EmailStr
+    phone: str
     password: str
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone_login(cls, v: str) -> str:
+        return ValidationUtils.validate_phone(v)
 
 class UserInDB(UserBase):
     id: int
