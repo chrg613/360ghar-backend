@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -14,19 +15,18 @@ class Base(DeclarativeBase):
 logger.info(f"Connecting to database with psycopg for PgBouncer compatibility")
 
 # Create async engine using psycopg for better PgBouncer compatibility
+# Use NullPool because PgBouncer performs pooling; avoids SQLAlchemy pre-ping
+# which can toggle autocommit and conflict with active transactions.
 engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
-    pool_size=20,
-    max_overflow=40,
-    pool_pre_ping=True,
-    pool_recycle=3600,
     echo=settings.DEBUG,
     future=True,
+    poolclass=NullPool,
     # Connection settings for PgBouncer compatibility
     connect_args={
         "application_name": "360ghar_backend",  # For monitoring
         "prepare_threshold": None,  # Disable prepared statements for PgBouncer
-    }
+    },
 )
 
 # Session factory
@@ -35,7 +35,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
-    autocommit=False
+    autocommit=False,
 )
 
 # Dependency for FastAPI
@@ -43,7 +43,6 @@ async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except HTTPException:
             # Propagate HTTP errors without logging as DB errors
             await session.rollback()
@@ -52,5 +51,6 @@ async def get_db() -> AsyncSession:
             logger.error(f"Database session error: {e}")
             await session.rollback()
             raise
-        finally:
-            await session.close()
+        else:
+            # Commit only if no exception occurred during the request
+            await session.commit()
