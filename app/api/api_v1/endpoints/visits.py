@@ -9,7 +9,7 @@ from app.schemas.visit import (
 from app.schemas.common import MessageResponse
 from app.services.visit import (
     create_visit, get_visit, get_user_visits, update_visit,
-    cancel_visit, reschedule_visit, get_user_relationship_manager
+    cancel_visit, reschedule_visit
 )
 
 router = APIRouter()
@@ -45,16 +45,6 @@ async def get_past_visits(
     from app.services.visit import get_user_past_visits
     return await get_user_past_visits(db, current_user.id)
 
-@router.get("/relationship-manager/")
-async def get_my_relationship_manager(
-    current_user: UserSchema = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    rm = await get_user_relationship_manager(db, current_user.id)
-    if not rm:
-        raise HTTPException(status_code=404, detail="Relationship manager not assigned")
-    return rm
-
 @router.get("/{visit_id}", response_model=Visit)
 async def get_visit_details(
     visit_id: int,
@@ -88,13 +78,14 @@ async def update_visit_details(
     
     return await update_visit(db, visit_id, visit_update)
 
-@router.post("/reschedule/", response_model=MessageResponse)
+@router.post("/{visit_id}/reschedule", response_model=MessageResponse)
 async def reschedule_visit_date(
+    visit_id: int,
     reschedule_data: VisitReschedule,
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    visit = await get_visit(db, reschedule_data.visit_id)
+    visit = await get_visit(db, visit_id)
     if not visit:
         raise HTTPException(status_code=404, detail="Visit not found")
     
@@ -102,19 +93,20 @@ async def reschedule_visit_date(
     if visit.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    success = await reschedule_visit(db, reschedule_data.visit_id, reschedule_data.new_date, reschedule_data.reason)
+    success = await reschedule_visit(db, visit_id, reschedule_data.new_date, reschedule_data.reason)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to reschedule visit")
     
     return MessageResponse(message="Visit rescheduled successfully")
 
-@router.post("/cancel/", response_model=MessageResponse)
+@router.post("/{visit_id}/cancel", response_model=MessageResponse)
 async def cancel_visit_request(
+    visit_id: int,
     cancel_data: VisitCancel,
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    visit = await get_visit(db, cancel_data.visit_id)
+    visit = await get_visit(db, visit_id)
     if not visit:
         raise HTTPException(status_code=404, detail="Visit not found")
     
@@ -122,7 +114,7 @@ async def cancel_visit_request(
     if visit.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    success = await cancel_visit(db, cancel_data.visit_id, cancel_data.reason)
+    success = await cancel_visit(db, visit_id, cancel_data.reason)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to cancel visit")
     

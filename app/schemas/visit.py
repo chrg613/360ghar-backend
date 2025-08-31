@@ -27,12 +27,10 @@ class VisitUpdate(BaseModel):
     cancellation_reason: Optional[str] = None
 
 class VisitReschedule(BaseModel):
-    visit_id: int
     new_date: datetime
     reason: Optional[str] = None
 
 class VisitCancel(BaseModel):
-    visit_id: int
     reason: str
 
 class Visit(VisitBase):

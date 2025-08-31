@@ -144,27 +144,6 @@ async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, 
     
     return False
 
-async def get_user_relationship_manager(db: AsyncSession, user_id: int):
-    """Get the relationship manager (agent) for a user"""
-    stmt = select(User).where(User.id == user_id)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if user and user.agent_id:
-        stmt = select(Agent).where(Agent.id == user.agent_id)
-        result = await db.execute(stmt)
-        agent = result.scalar_one_or_none()
-        if agent:
-            return {
-                "id": agent.id,
-                "name": agent.name,
-                "description": agent.description,
-                "avatar_url": agent.avatar_url,
-                "languages": agent.languages
-            }
-    
-    return None
-
 async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit: int = 20):
     """Get visits handled by a specific agent"""
     offset = (page - 1) * limit
