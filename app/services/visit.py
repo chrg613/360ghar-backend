@@ -10,6 +10,18 @@ async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     """Create a new visit"""
     visit_data = visit.model_dump()
     visit_data["user_id"] = user_id
+
+    # Basic validation: scheduled date must be in the future
+    scheduled_date = visit_data.get("scheduled_date")
+    if scheduled_date is None:
+        raise ValueError("scheduled_date is required")
+    if scheduled_date.tzinfo is None:
+        # Treat naive datetimes as UTC to avoid naive/aware comparison errors
+        scheduled_date = scheduled_date.replace(tzinfo=timezone.utc)
+        visit_data["scheduled_date"] = scheduled_date
+    now = datetime.now(timezone.utc)
+    if scheduled_date < now:
+        raise ValueError("scheduled_date must be in the future")
     
     db_visit = Visit(**visit_data)
     db.add(db_visit)
@@ -46,7 +58,11 @@ async def get_user_visits(db: AsyncSession, user_id: int):
     
     # Count visits by status
     now = datetime.now(timezone.utc)
-    upcoming = sum(1 for v in visits if v.status in ["scheduled", "confirmed"] and v.scheduled_date > now)
+    upcoming = sum(
+        1
+        for v in visits
+        if v.status in ["scheduled", "confirmed", "rescheduled"] and v.scheduled_date > now
+    )
     completed = sum(1 for v in visits if v.status == "completed")
     cancelled = sum(1 for v in visits if v.status == "cancelled")
     
@@ -67,7 +83,7 @@ async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
     ).where(
         Visit.user_id == user_id,
         Visit.scheduled_date > now,
-        Visit.status.in_(["scheduled", "confirmed"])
+        Visit.status.in_(["scheduled", "confirmed", "rescheduled"])
     ).order_by(Visit.scheduled_date)
     result = await db.execute(stmt)
     visits = result.scalars().all()
@@ -114,35 +130,81 @@ async def update_visit(db: AsyncSession, visit_id: int, visit_update: VisitUpdat
     return None
 
 async def cancel_visit(db: AsyncSession, visit_id: int, reason: str):
-    """Cancel a visit"""
+    """Cancel a visit and return the updated visit with relationships.
+
+    Returns:
+        Visit | None: Updated visit on success, None on failure/not found.
+    """
     stmt = select(Visit).where(Visit.id == visit_id)
     result = await db.execute(stmt)
     visit = result.scalar_one_or_none()
-    
-    if visit:
-        visit.status = "cancelled"
-        visit.cancellation_reason = reason
-        await db.flush()
-        return True
-    
-    return False
+
+    if not visit:
+        return None
+
+    # Disallow cancellation for already cancelled or completed visits
+    if visit.status in ["cancelled", "completed"]:
+        return None
+
+    visit.status = "cancelled"
+    visit.cancellation_reason = reason
+    await db.flush()
+
+    # Re-select with eager-loaded relationships for serialization safety
+    stmt = (
+        select(Visit)
+        .options(
+            selectinload(Visit.property).selectinload(Property.images),
+            selectinload(Visit.property).selectinload(Property.property_amenities),
+        )
+        .where(Visit.id == visit_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, reason: Optional[str] = None):
-    """Reschedule a visit"""
+    """Reschedule a visit and return the updated visit with relationships.
+
+    Returns:
+        Visit | None: Updated visit on success, None on failure/not found.
+    """
     stmt = select(Visit).where(Visit.id == visit_id)
     result = await db.execute(stmt)
     visit = result.scalar_one_or_none()
-    
-    if visit:
-        visit.rescheduled_from = visit.scheduled_date
-        visit.scheduled_date = new_date
-        visit.status = "rescheduled"
-        if reason:
-            visit.cancellation_reason = reason
-        await db.flush()
-        return True
-    
-    return False
+
+    if not visit:
+        return None
+
+    # Disallow rescheduling for already cancelled or completed visits
+    if visit.status in ["cancelled", "completed"]:
+        return None
+
+    # Ensure new date is timezone-aware and in the future
+    if new_date.tzinfo is None:
+        new_date = new_date.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if new_date < now:
+        return None
+
+    visit.rescheduled_from = visit.scheduled_date
+    visit.scheduled_date = new_date
+    visit.status = "rescheduled"
+    if reason:
+        # Store reason; field name kept for compatibility
+        visit.cancellation_reason = reason
+    await db.flush()
+
+    # Re-select with eager-loaded relationships for serialization safety
+    stmt = (
+        select(Visit)
+        .options(
+            selectinload(Visit.property).selectinload(Property.images),
+            selectinload(Visit.property).selectinload(Property.property_amenities),
+        )
+        .where(Visit.id == visit_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit: int = 20):
     """Get visits handled by a specific agent"""

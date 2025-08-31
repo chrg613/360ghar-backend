@@ -50,17 +50,20 @@ pytest tests/
 # Run specific test file
 pytest tests/test_specific_file.py
 
-# Run tests with verbose output
-pytest -v tests/
+# Run tests with verbose output and coverage
+pytest -v tests/ --cov=app
+
+# Run async tests
+pytest tests/ -v --asyncio-mode=auto
 
 # Run load testing for API endpoints
 python tests/load_test_properties.py
 
-# No specific linting configuration found
-# For code formatting, add ruff or black:
-pip install ruff black
-ruff check app/
-black app/
+# Code quality (install if needed)
+pip install ruff black isort
+ruff check app/                 # Linting
+black app/                     # Code formatting
+isort app/                     # Import sorting
 ```
 
 ### Database Operations
@@ -87,10 +90,10 @@ python populate_data/load_comprehensive_data.py
 python populate_data/load_comprehensive_data.py --quick
 
 # Clear all existing data before loading
-python populate_data/clear_all_data.py
+python populate_data/load_comprehensive_data.py --clear
 
-# Environment-specific loading with custom config
-PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/load_comprehensive_data.py
+# Clear all data (alternative method)
+python populate_data/clear_all_data.py
 ```
 
 ## Architecture Overview
@@ -192,17 +195,18 @@ This project follows strict coding conventions as defined in `.rules/codingrules
 ### Critical Development Patterns
 
 #### Async Database Operations
-All database operations MUST use async patterns with direct model access:
+All database operations MUST use async patterns with SQLAlchemy 2.0+ style:
 ```python
-# Correct - Using SQLAlchemy 2.0 style with direct models
+# Correct - Using SQLAlchemy 2.0 async style with direct models
 from app.models.models import Property
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 async def get_property(db: AsyncSession, property_id: int):
     result = await db.execute(select(Property).where(Property.id == property_id))
     return result.scalar_one_or_none()
 
-# Also correct - For simple operations
+# For simple create operations
 async def create_property(db: AsyncSession, property_data: dict):
     property = Property(**property_data)
     db.add(property)
@@ -210,7 +214,17 @@ async def create_property(db: AsyncSession, property_data: dict):
     await db.refresh(property)
     return property
 
-# Wrong - Old SQLAlchemy 1.x style
+# For complex queries with relationships
+async def get_property_with_amenities(db: AsyncSession, property_id: int):
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Property)
+        .options(selectinload(Property.amenities))
+        .where(Property.id == property_id)
+    )
+    return result.scalar_one_or_none()
+
+# Wrong - Old SQLAlchemy 1.x style (avoid this)
 def get_property(db: AsyncSession, property_id: int):
     return db.query(Property).filter(Property.id == property_id).first()
 ```
@@ -327,13 +341,30 @@ raise HTTPException(
 ## Environment Variables
 
 Required environment variables in `.env`:
-```
+```env
+# Database Configuration
 DATABASE_URL=postgresql://username:password@host:port/database
+
+# Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your_anon_key
 SUPABASE_SECRET_KEY=your_service_role_key
+
+# JWT Configuration  
 SECRET_KEY=your_jwt_secret_key
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Redis Configuration
 REDIS_URL=redis://localhost:6379
+
+# Environment
+ENVIRONMENT=development
+DEBUG=true
+
+# File Upload
+MAX_FILE_SIZE=5242880  # 5MB
+UPLOAD_PATH=uploads/
 ```
 
 ## API Documentation

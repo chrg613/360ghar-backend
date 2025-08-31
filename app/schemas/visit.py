@@ -60,3 +60,6 @@ class VisitList(BaseModel):
     completed: int
     cancelled: int
 
+class VisitSlice(BaseModel):
+    visits: list[Visit]
+    total: int
