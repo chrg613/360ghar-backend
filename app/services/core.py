@@ -4,13 +4,14 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from app.models.models import BugReport, Page, AppUpdate, User
+from app.models.models import BugReport, Page, AppUpdate, User, FAQ
 from app.models.enums import BugStatus, PageFormat, BugType
 from app.schemas.core import (
     BugReportCreate, BugReportUpdate, BugReportResponse,
     PageCreate, PageUpdate, PageResponse, PagePublicResponse,
     AppUpdateCreate, AppUpdateUpdate, AppUpdateResponse,
-    AppUpdateCheckRequest, AppUpdateCheckResponse
+    AppUpdateCheckRequest, AppUpdateCheckResponse,
+    FAQCreate, FAQUpdate, FAQResponse
 )
 from app.core.exceptions import NotFoundException, ValidationException
 
@@ -142,6 +143,7 @@ class CoreService:
             # Increment view count
             page.view_count += 1
             await self.db.commit()
+            await self.db.refresh(page)
 
             return PageResponse.model_validate(page)
         return None
@@ -164,6 +166,7 @@ class CoreService:
             # Increment view count
             page.view_count += 1
             await self.db.commit()
+            await self.db.refresh(page)
 
             return PagePublicResponse.model_validate(page)
         return None
@@ -349,3 +352,72 @@ class CoreService:
         updated_update = result.scalar_one()
 
         return AppUpdateResponse.model_validate(updated_update)
+
+    # FAQ Methods
+    async def create_faq(self, faq_data: FAQCreate) -> FAQResponse:
+        """Create a new FAQ entry"""
+        faq = FAQ(**faq_data.model_dump())
+        self.db.add(faq)
+        await self.db.commit()
+        await self.db.refresh(faq)
+        return FAQResponse.model_validate(faq)
+
+    async def get_faqs(
+        self,
+        category: Optional[str] = None,
+        is_active: Optional[bool] = True,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[FAQResponse]:
+        """Get FAQs with optional filtering by category and active status"""
+        query = select(FAQ)
+
+        if category:
+            query = query.where(FAQ.category == category)
+
+        if is_active is not None:
+            query = query.where(FAQ.is_active == is_active)
+
+        # Order by display_order ascending, then most recent
+        query = query.order_by(FAQ.display_order.asc(), desc(FAQ.created_at)).limit(limit).offset(offset)
+
+        result = await self.db.execute(query)
+        faqs = result.scalars().all()
+        return [FAQResponse.model_validate(faq) for faq in faqs]
+
+    async def get_faq_by_id(self, faq_id: int) -> FAQResponse:
+        query = select(FAQ).where(FAQ.id == faq_id)
+        result = await self.db.execute(query)
+        faq = result.scalar_one_or_none()
+        if not faq:
+            raise NotFoundException(f"FAQ with ID {faq_id} not found")
+        return FAQResponse.model_validate(faq)
+
+    async def update_faq(self, faq_id: int, update_data: FAQUpdate) -> FAQResponse:
+        # Ensure exists
+        _ = await self.get_faq_by_id(faq_id)
+        update_dict = update_data.model_dump(exclude_unset=True)
+        query = (
+            update(FAQ)
+            .where(FAQ.id == faq_id)
+            .values(**update_dict)
+        )
+        await self.db.execute(query)
+        await self.db.commit()
+        # Return updated
+        result = await self.db.execute(select(FAQ).where(FAQ.id == faq_id))
+        updated = result.scalar_one()
+        return FAQResponse.model_validate(updated)
+
+    async def delete_faq(self, faq_id: int) -> bool:
+        """Soft delete an FAQ by setting is_active to False"""
+        # Ensure exists
+        _ = await self.get_faq_by_id(faq_id)
+        query = (
+            update(FAQ)
+            .where(FAQ.id == faq_id)
+            .values(is_active=False)
+        )
+        result = await self.db.execute(query)
+        await self.db.commit()
+        return result.rowcount > 0

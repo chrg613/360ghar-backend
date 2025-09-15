@@ -1,9 +1,8 @@
-"""
-User data populator for testing
-"""
+"""User data populator that loads seed users from JSON."""
+import json
 import uuid
-from datetime import datetime, timezone, date
-from typing import Optional
+from datetime import date
+from typing import Optional, List, Dict, Any
 import sys
 import os
 from sqlalchemy import select, delete
@@ -11,158 +10,149 @@ from sqlalchemy import select, delete
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.core.logging import get_logger
 from app.models.models import User
 from .base import BasePopulator
 
-logger = get_logger(__name__)
-
 class UserPopulator(BasePopulator):
-    """Populates test users in the database"""
-    
+    """Populates test users in the database from JSON seed data."""
+
     def __init__(self):
         super().__init__()
-    
-    async def populate(self, count: Optional[int] = 2) -> int:
+
+    def _default_users_path(self) -> str:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base_dir, "data", "users.json")
+
+    def _load_users_from_file(self, file_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Load user definitions from JSON."""
+        path = file_path or self._default_users_path()
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"User JSON not found at: {path}")
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, list):
+            raise ValueError("users.json must contain a list of user objects")
+        return data
+
+    def _prepare_user_payload(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert JSON payload into model friendly structure."""
+        payload = dict(raw)
+
+        supabase_id = payload.get("supabase_user_id")
+        if not supabase_id:
+            payload["supabase_user_id"] = str(uuid.uuid4())
+
+        dob = payload.get("date_of_birth")
+        if isinstance(dob, str):
+            try:
+                payload["date_of_birth"] = date.fromisoformat(dob)
+            except ValueError:
+                self.logger.warning(
+                    f"Invalid date_of_birth '{dob}' for user {payload.get('email')}; using defaults"
+                )
+                payload["date_of_birth"] = date.today()
+        elif not isinstance(dob, date):
+            payload["date_of_birth"] = date.today()
+
+        # Ensure JSON fields are dicts (None defaults to empty dict)
+        for key in ("preferences", "notification_settings", "privacy_settings"):
+            value = payload.get(key)
+            if value is None:
+                payload[key] = {}
+
+        return payload
+
+    async def populate(
+        self,
+        count: Optional[int] = None,
+        file_path: Optional[str] = None,
+    ) -> int:
         """
-        Create test users
-        
+        Create test users (defaults to users defined in users.json).
+
         Args:
-            count: Number of users to create (default: 2)
-            
+            count: Optional cap on number of users to create.
+            file_path: Optional path to a custom users.json file.
+
         Returns:
-            Number of users created
+            Number of users created.
         """
+        users_data = self._load_users_from_file(file_path)
+
         if count is None:
-            count = 2
-            
-        self.logger.info(f"Creating {count} test users...")
-        
-        # Test user data
-        test_users = [
-            {
-                "supabase_user_id": str(uuid.uuid4()),
-                "email": "testuser1@360ghar.com",
-                "full_name": "Raj Sharma",
-                "phone": "+919876543210",
-                "date_of_birth": date(1990, 5, 15),
-                "is_active": True,
-                "is_verified": True,
-                "current_latitude": 28.4595,  # Gurgaon
-                "current_longitude": 77.0266,
-                "preferences": {
-                    "property_type": ["apartment", "builder_floor"],
-                    "purpose": "rent",
-                    "budget_min": 25000,
-                    "budget_max": 50000,
-                    "bedrooms_min": 2,
-                    "bedrooms_max": 3,
-                    "area_min": 1000,
-                    "area_max": 1500,
-                    "location_preference": ["DLF Phase 1", "DLF Phase 2", "Sector 29"],
-                    "max_distance_km": 10
-                },
-                "notification_settings": {
-                    "email_notifications": True,
-                    "push_notifications": True,
-                    "sms_notifications": False
-                },
-                "privacy_settings": {
-                    "profile_visibility": "public",
-                    "location_sharing": True
-                },
-                "profile_image_url": "https://api.dicebear.com/7.x/avataaars/svg?seed=Raj"
-            },
-            {
-                "supabase_user_id": str(uuid.uuid4()),
-                "email": "testuser2@360ghar.com",
-                "full_name": "Priya Patel",
-                "phone": "+919876543211",
-                "date_of_birth": date(1988, 8, 22),
-                "is_active": True,
-                "is_verified": True,
-                "current_latitude": 19.0760,  # Mumbai
-                "current_longitude": 72.8777,
-                "preferences": {
-                    "property_type": ["apartment", "house"],
-                    "purpose": "buy",
-                    "budget_min": 8000000,
-                    "budget_max": 15000000,
-                    "bedrooms_min": 2,
-                    "bedrooms_max": 4,
-                    "area_min": 800,
-                    "area_max": 1200,
-                    "location_preference": ["Bandra West", "Juhu", "Andheri West"],
-                    "max_distance_km": 15
-                },
-                "notification_settings": {
-                    "email_notifications": True,
-                    "push_notifications": True,
-                    "sms_notifications": True
-                },
-                "privacy_settings": {
-                    "profile_visibility": "friends",
-                    "location_sharing": False
-                },
-                "profile_image_url": "https://api.dicebear.com/7.x/avataaars/svg?seed=Priya"
-            }
-        ]
-        
+            count = len(users_data)
+
+        self.logger.info(f"Creating {count} users from JSON seed data...")
+
         created_count = 0
-        
+
         async with await self.get_db_session() as session:
             try:
-                for i, user_data in enumerate(test_users[:count]):
+                for user_data in users_data[:count]:
                     try:
-                        # Check if user already exists
+                        email = user_data.get("email")
+                        if not email:
+                            self.logger.warning("Skipping user without an email in JSON data")
+                            continue
+
                         existing_user = await session.execute(
-                            select(User).where(User.email == user_data["email"])
+                            select(User).where(User.email == email)
                         )
                         if existing_user.scalar_one_or_none():
-                            self.logger.info(f"User {user_data['email']} already exists, skipping...")
+                            self.logger.info(f"User {email} already exists, skipping...")
                             continue
-                        
-                        # Create user
-                        user = User(**user_data)
+
+                        payload = self._prepare_user_payload(user_data)
+
+                        user = User(**payload)
                         session.add(user)
-                        await session.flush()  # Get the ID
+                        await session.flush()
                         created_count += 1
-                        
-                        self.logger.info(f"Created user: {user_data['full_name']} ({user_data['email']})")
-                        
-                    except Exception as e:
-                        self.logger.error(f"Failed to create user {user_data['email']}: {str(e)}")
+
+                        self.logger.info(f"Created user: {payload.get('full_name')} ({email})")
+
+                    except Exception as exc:
+                        self.logger.error(f"Failed to create user {user_data.get('email', '<unknown>')}: {exc}")
                         continue
-                
+
                 await session.commit()
                 self.logger.info(f"Successfully created {created_count} users")
-                
-            except Exception as e:
+
+            except Exception as exc:
                 await session.rollback()
-                self.logger.error(f"Failed to create users: {str(e)}")
+                self.logger.error(f"Failed to create users: {exc}")
                 raise
-        
+
         return created_count
     
-    async def clear_all(self) -> int:
-        """Clear all test users"""
+    async def clear_all(self, file_path: Optional[str] = None) -> int:
+        """Clear JSON-defined users from the database."""
         try:
-            # Delete test users by email pattern
-            test_emails = ["testuser1@360ghar.com", "testuser2@360ghar.com"]
+            try:
+                users_data = self._load_users_from_file(file_path)
+                target_emails = [u["email"] for u in users_data if u.get("email")]
+            except (FileNotFoundError, ValueError) as exc:
+                self.logger.warning(f"Unable to load user seed data for cleanup: {exc}")
+                target_emails = []
+
+            if not target_emails:
+                self.logger.info("No user emails found in JSON; skipping cleanup")
+                return 0
+
             deleted_count = 0
-            
+
             async with await self.get_db_session() as session:
-                for email in test_emails:
+                for email in target_emails:
                     result = await session.execute(
                         delete(User).where(User.email == email)
                     )
-                    deleted_count += result.rowcount
-                
+                    deleted_count += result.rowcount or 0
+
                 await session.commit()
-            
-            self.logger.info(f"Deleted {deleted_count} test users")
+
+            self.logger.info(f"Deleted {deleted_count} users defined in JSON")
             return deleted_count
-            
-        except Exception as e:
-            self.logger.error(f"Failed to clear users: {str(e)}")
+
+        except Exception as exc:
+            self.logger.error(f"Failed to clear users: {exc}")
             return 0

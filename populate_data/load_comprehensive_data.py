@@ -4,8 +4,10 @@ Comprehensive data population script for 360Ghar backend testing
 
 This script populates the database with sample data for testing:
 - 1-2 test users
-- 1-2 test agents 
+- 1-2 test agents
+- Core amenity definitions
 - 1000 properties across different locations
+- FAQ entries for the help centre
 - Sets up agent assignments for users
 
 Usage:
@@ -18,7 +20,7 @@ import asyncio
 import argparse
 import sys
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +33,7 @@ from populate_data.data_populators.user_populator import UserPopulator
 from populate_data.data_populators.agent_populator import AgentPopulator
 from populate_data.data_populators.amenity_populator import AmenityPopulator
 from populate_data.data_populators.property_populator import PropertyPopulator
+from populate_data.data_populators.faq_populator import FAQPopulator
 
 # Configure logging
 setup_logging()
@@ -45,6 +48,7 @@ class DataLoader:
         self.agent_populator = AgentPopulator()
         self.amenity_populator = AmenityPopulator()
         self.property_populator = PropertyPopulator()
+        self.faq_populator = FAQPopulator()
     
     async def clear_all_data(self):
         """Clear all test data from database"""
@@ -56,8 +60,16 @@ class DataLoader:
             cleared_users = await self.user_populator.clear_all()
             cleared_agents = await self.agent_populator.clear_all()
             cleared_amenities = await self.amenity_populator.clear_all()
+            cleared_faqs = await self.faq_populator.clear_all()
             
-            logger.info(f"Cleared: {cleared_properties} properties, {cleared_users} users, {cleared_agents} agents, {cleared_amenities} amenities")
+            logger.info(
+                "Cleared: %s properties, %s users, %s agents, %s amenities, %s FAQs",
+                cleared_properties,
+                cleared_users,
+                cleared_agents,
+                cleared_amenities,
+                cleared_faqs,
+            )
             
         except Exception as e:
             logger.error(f"Failed to clear data: {str(e)}")
@@ -136,6 +148,10 @@ class DataLoader:
             logger.info("Step 5: Assigning agents to users...")
             await self.assign_agents_to_users()
             
+            # Step 6: Create FAQs
+            logger.info("Step 6: Creating FAQs...")
+            created_faqs = await self.faq_populator.populate(update_existing=True)
+            
             # Summary
             end_time = datetime.now()
             duration = end_time - start_time
@@ -147,6 +163,10 @@ class DataLoader:
             logger.info(f"Created: {created_users} users")
             logger.info(f"Created: {created_amenities} amenities")
             logger.info(f"Created: {created_properties} properties")
+            logger.info(
+                "Created: %s FAQs (updates allowed; see debug logs for update count)",
+                created_faqs,
+            )
             logger.info(f"Duration: {duration.total_seconds():.2f} seconds")
             logger.info("=" * 60)
             

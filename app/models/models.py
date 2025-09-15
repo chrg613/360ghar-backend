@@ -355,3 +355,17 @@ class AppUpdate(Base):
     min_supported_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now(), nullable=True)
+
+class FAQ(Base):
+    __tablename__ = "faqs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question: Mapped[str] = mapped_column(String, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    # Category can be used for platform/app segmentation (e.g., 'ios', 'android', 'web', 'agent', 'user')
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now(), nullable=True)

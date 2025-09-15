@@ -147,3 +147,34 @@ class AppUpdateCheckResponse(BaseModel):
     download_url: Optional[str] = None
     release_notes: Optional[str] = None
     min_supported_version: Optional[str] = None
+
+# FAQ Schemas
+class FAQCreate(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500, description="FAQ question")
+    answer: str = Field(..., min_length=1, description="FAQ answer")
+    category: Optional[str] = Field(None, description="Category for filtering (e.g., platform, app segment)")
+    tags: Optional[List[str]] = Field(None, description="Additional tags for filtering/search")
+    display_order: int = Field(0, description="Display order for sorting")
+    is_active: bool = Field(True, description="Whether the FAQ is active")
+
+class FAQUpdate(BaseModel):
+    question: Optional[str] = Field(None, min_length=1, max_length=500)
+    answer: Optional[str] = Field(None, min_length=1)
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class FAQResponse(BaseModel):
+    id: int
+    question: str
+    answer: str
+    category: Optional[str]
+    tags: Optional[List[str]]
+    display_order: int
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

@@ -11,7 +11,8 @@ from app.schemas.core import (
     BugReportCreate, BugReportUpdate, BugReportResponse,
     PageCreate, PageUpdate, PageResponse, PagePublicResponse,
     AppUpdateCreate, AppUpdateUpdate, AppUpdateResponse,
-    AppUpdateCheckRequest, AppUpdateCheckResponse
+    AppUpdateCheckRequest, AppUpdateCheckResponse,
+    FAQCreate, FAQUpdate, FAQResponse
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.services.core import CoreService
@@ -287,3 +288,79 @@ async def update_app_update(
 ):
     """Update an app update entry (admin only)"""
     return await core_service.update_app_update(update_id, update_data)
+
+# ============================================================================
+# FAQ ENDPOINTS
+# ============================================================================
+
+@router.post("/faqs/", response_model=FAQResponse)
+async def create_faq(
+    faq_data: FAQCreate,
+    current_user: UserSchema = Depends(get_current_admin),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Create a new FAQ (admin only)"""
+    return await core_service.create_faq(faq_data)
+
+@router.get("/faqs/", response_model=List[FAQResponse])
+async def get_faqs_admin(
+    category: Optional[str] = Query(None, description="Filter by category/platform"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    limit: int = Query(50, ge=1, le=100, description="Number of results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    current_user: UserSchema = Depends(get_current_admin),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Get FAQs with admin filters (admin only)"""
+    return await core_service.get_faqs(
+        category=category,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
+    )
+
+@router.get("/faqs/public", response_model=List[FAQResponse])
+async def get_faqs_public(
+    category: Optional[str] = Query(None, description="Filter by category/platform"),
+    limit: int = Query(50, ge=1, le=100, description="Number of results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Public FAQs listing (only active FAQs)"""
+    return await core_service.get_faqs(
+        category=category,
+        is_active=True,
+        limit=limit,
+        offset=offset,
+    )
+
+@router.get("/faqs/{faq_id}", response_model=FAQResponse)
+async def get_faq(
+    faq_id: int,
+    current_user: UserSchema = Depends(get_current_admin),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Get a specific FAQ (admin only)"""
+    return await core_service.get_faq_by_id(faq_id)
+
+@router.put("/faqs/{faq_id}", response_model=FAQResponse)
+async def update_faq(
+    faq_id: int,
+    update_data: FAQUpdate,
+    current_user: UserSchema = Depends(get_current_admin),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Update an FAQ (admin only)"""
+    return await core_service.update_faq(faq_id, update_data)
+
+@router.delete("/faqs/{faq_id}", response_model=MessageResponse)
+async def delete_faq(
+    faq_id: int,
+    current_user: UserSchema = Depends(get_current_admin),
+    core_service: CoreService = Depends(get_core_service)
+):
+    """Soft delete an FAQ (admin only)"""
+    success = await core_service.delete_faq(faq_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="FAQ not found")
+    return MessageResponse(message="FAQ deleted successfully")
