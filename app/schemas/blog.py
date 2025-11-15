@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -23,8 +23,7 @@ class BlogCategory(BlogCategoryBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BlogCategoryListResponse(BaseModel):
@@ -55,8 +54,7 @@ class BlogTag(BlogTagBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BlogTagListResponse(BaseModel):
@@ -81,7 +79,7 @@ class BlogPostBase(BaseModel):
 
 
 class BlogPostCreate(BlogPostBase):
-    pass
+    active: Optional[bool] = Field(default=False, description="Publish status (defaults to draft)")
 
 
 class BlogPostUpdate(BaseModel):
@@ -91,24 +89,24 @@ class BlogPostUpdate(BaseModel):
     cover_image_url: Optional[str] = Field(None, description="Cover image URL")
     categories: Optional[List[str]] = Field(default=None, description="Category slugs or names")
     tags: Optional[List[str]] = Field(default=None, description="Tag slugs or names")
+    active: Optional[bool] = Field(default=None, description="Publish status")
 
 
 class BlogPostInDB(BlogPostBase):
     id: int
     slug: str
+    active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BlogPost(BlogPostInDB):
     categories: Optional[List[BlogCategory]] = None
     tags: Optional[List[BlogTag]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BlogPostListResponse(BaseModel):
@@ -119,3 +117,17 @@ class BlogPostListResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_prev: bool
+
+
+# AI generation schemas
+class BlogGenerateFromTopicRequest(BaseModel):
+    topic: str = Field(..., min_length=3, description="Topic to generate a blog for")
+
+
+class BlogGenerateBulkRequest(BaseModel):
+    count: int = Field(1, ge=1, le=20, description="Number of blogs to generate")
+
+
+class BlogGenerationResult(BaseModel):
+    blog: BlogPost
+    images: List[str]

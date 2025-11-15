@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from datetime import date, datetime
 from app.utils.validators import ValidationUtils
@@ -109,8 +109,7 @@ class UserInDB(UserBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class User(UserInDB):
     pass

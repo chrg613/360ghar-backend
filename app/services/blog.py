@@ -100,6 +100,7 @@ async def create_blog_post(db: AsyncSession, data, actor) -> "app.schemas.blog.B
         content=data.content,
         excerpt=data.excerpt,
         cover_image_url=data.cover_image_url,
+        active=getattr(data, "active", False) or False,
         author_id=getattr(actor, "id", None),
     )
     db.add(post)
@@ -125,7 +126,11 @@ async def create_blog_post(db: AsyncSession, data, actor) -> "app.schemas.blog.B
     return BlogPostSchema.model_validate(created)
 
 
-async def get_blog_post(db: AsyncSession, identifier: str) -> Optional["app.schemas.blog.BlogPost"]:
+async def get_blog_post(
+    db: AsyncSession,
+    identifier: str,
+    include_inactive: bool = False,
+) -> Optional["app.schemas.blog.BlogPost"]:
     from app.schemas.blog import BlogPost as BlogPostSchema
 
     cond = None
@@ -141,6 +146,9 @@ async def get_blog_post(db: AsyncSession, identifier: str) -> Optional["app.sche
         .options(selectinload(BlogPost.categories), selectinload(BlogPost.tags))
         .where(cond)
     )
+    if not include_inactive:
+        stmt = stmt.where(BlogPost.active.is_(True))
+
     result = await db.execute(stmt)
     post = result.scalar_one_or_none()
     if not post:
@@ -155,6 +163,7 @@ async def list_blog_posts(
     tags: Optional[List[str]],
     page: int,
     limit: int,
+    include_inactive: bool = False,
 ) -> Tuple[List["app.schemas.blog.BlogPost"], int]:
     from app.schemas.blog import BlogPost as BlogPostSchema
 
@@ -162,6 +171,9 @@ async def list_blog_posts(
     count_query = select(func.count(BlogPost.id))
 
     conditions = []
+
+    if not include_inactive:
+        conditions.append(BlogPost.active.is_(True))
 
     if q:
         like = f"%{q}%"
@@ -442,6 +454,8 @@ async def update_blog_post(db: AsyncSession, identifier: str, data, actor) -> "a
         post.excerpt = data.excerpt
     if data.cover_image_url is not None:
         post.cover_image_url = data.cover_image_url
+    if getattr(data, "active", None) is not None:
+        post.active = bool(data.active)
 
     # Update categories and tags if provided
     if data.categories is not None:

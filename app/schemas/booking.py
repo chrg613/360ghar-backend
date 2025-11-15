@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict, model_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 from app.models.enums import BookingStatus, PaymentStatus
@@ -16,11 +16,11 @@ class BookingBase(BaseModel):
 class BookingCreate(BookingBase):
     guest_details: Optional[Dict[str, Any]] = None
     
-    @validator('check_out_date')
-    def validate_dates(cls, v, values):
-        if 'check_in_date' in values and v <= values['check_in_date']:
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.check_out_date <= self.check_in_date:
             raise ValueError('Check-out date must be after check-in date')
-        return v
+        return self
 
 class BookingUpdate(BaseModel):
     check_in_date: Optional[datetime] = None
@@ -47,8 +47,9 @@ class BookingReview(BaseModel):
     guest_rating: int  # 1-5 stars
     guest_review: Optional[str] = None
     
-    @validator('guest_rating')
-    def validate_rating(cls, v):
+    @field_validator("guest_rating")
+    @classmethod
+    def validate_rating(cls, v: int) -> int:
         if v < 1 or v > 5:
             raise ValueError('Rating must be between 1 and 5')
         return v
@@ -84,8 +85,7 @@ class Booking(BookingBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BookingList(BaseModel):
     bookings: list[Booking]

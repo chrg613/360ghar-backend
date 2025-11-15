@@ -8,13 +8,15 @@ from app.schemas.user import User as UserSchema
 from app.schemas.blog import (
     BlogPostCreate, BlogPostUpdate, BlogPost, BlogPostListResponse,
     BlogCategoryCreate, BlogCategoryUpdate, BlogCategory, BlogCategoryListResponse,
-    BlogTagCreate, BlogTagUpdate, BlogTag, BlogTagListResponse
+    BlogTagCreate, BlogTagUpdate, BlogTag, BlogTagListResponse,
+    BlogGenerateFromTopicRequest, BlogGenerateBulkRequest, BlogGenerationResult
 )
 from app.services.blog import (
     create_blog_post, get_blog_post, list_blog_posts, update_blog_post, delete_blog_post,
     create_category, get_category, list_categories, update_category, delete_category,
     create_tag, get_tag, list_tags, update_tag, delete_tag
 )
+from app.services.blog_service.generator import generate_draft_from_topic, generate_bulk_blogs
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -45,12 +47,21 @@ async def list_posts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: Optional[UserSchema] = Depends(get_current_user_optional),
+    current_user: Optional[UserSchema] = Depends(get_current_user_optional),
 ):
     """List blog posts with filters for categories, tags, and text search."""
     try:
         all_tags = (tags or []) + (keywords or [])
-        items, total = await list_blog_posts(db, q=q, categories=categories, tags=all_tags, page=page, limit=limit)
+        is_admin = bool(current_user and getattr(current_user, "role", None) == "admin")
+        items, total = await list_blog_posts(
+            db,
+            q=q,
+            categories=categories,
+            tags=all_tags,
+            page=page,
+            limit=limit,
+            include_inactive=is_admin,
+        )
         total_pages = (total + limit - 1) // limit
         return {
             "items": items,
@@ -67,9 +78,14 @@ async def list_posts(
 
 
 @router.get("/posts/{identifier}", response_model=BlogPost)
-async def get_post(identifier: str, db: AsyncSession = Depends(get_db), _current_user: Optional[UserSchema] = Depends(get_current_user_optional)):
+async def get_post(
+    identifier: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[UserSchema] = Depends(get_current_user_optional),
+):
     """Get a specific blog post by ID or slug. Public endpoint."""
-    post = await get_blog_post(db, identifier)
+    is_admin = bool(current_user and getattr(current_user, "role", None) == "admin")
+    post = await get_blog_post(db, identifier, include_inactive=is_admin)
     if not post:
         raise HTTPException(status_code=404, detail="Blog post not found")
     return post
@@ -106,6 +122,41 @@ async def delete_post(
         raise
     except Exception as e:
         logger.error(f"Failed to delete blog post: {e}", exc_info=True)
+        raise
+
+
+# AI-powered generation endpoints
+@router.post("/generate-from-topic", response_model=BlogGenerationResult)
+async def generate_from_topic(
+    payload: BlogGenerateFromTopicRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserSchema = Depends(get_current_active_user),
+):
+    """Generate a draft blog from a given topic using Perplexity and fetch images via Google Images (SerpAPI). Admin only."""
+    try:
+        result = await generate_draft_from_topic(db, topic=payload.topic, actor=current_user)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generation failed: {e}", exc_info=True)
+        raise
+
+
+@router.post("/generate-bulk", response_model=List[BlogGenerationResult])
+async def generate_bulk(
+    payload: BlogGenerateBulkRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserSchema = Depends(get_current_active_user),
+):
+    """Generate multiple draft blogs by first researching topics, then generating each one. Admin only."""
+    try:
+        results = await generate_bulk_blogs(db, count=payload.count, actor=current_user)
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bulk generation failed: {e}", exc_info=True)
         raise
 
 

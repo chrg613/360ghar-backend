@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.enums import BugType, BugSeverity, BugStatus, PageFormat
@@ -46,8 +46,7 @@ class BugReportResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Page Schemas
 class PageCreate(BaseModel):
@@ -85,8 +84,7 @@ class PageResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PagePublicResponse(BaseModel):
     """Response for public page access (without sensitive fields)"""
@@ -98,8 +96,7 @@ class PagePublicResponse(BaseModel):
     view_count: int
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # App Version Schemas
 class AppVersionCreate(BaseModel):
@@ -134,8 +131,7 @@ class AppVersionResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AppVersionCheckRequest(BaseModel):
     app: str = Field(..., description="App identifier (e.g., 'user', 'agent')")
@@ -179,5 +175,4 @@ class FAQResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Integer, String, Text, DateTime, ForeignKey, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from typing import Optional, List
@@ -60,6 +60,7 @@ class BlogPost(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cover_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
     author_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now(), nullable=True)

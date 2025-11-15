@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -9,16 +9,18 @@ class AmenityBase(BaseModel):
     is_active: bool = True
 
 class AmenityCreate(AmenityBase):
-    @validator('title')
-    def validate_title(cls, v):
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str) -> str:
         if not v or len(v.strip()) < 2:
             raise ValueError('Title must be at least 2 characters long')
         if len(v) > 100:
             raise ValueError('Title must be less than 100 characters')
         return v.strip()
     
-    @validator('category')
-    def validate_category(cls, v):
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: Optional[str]) -> Optional[str]:
         if v:
             allowed_categories = ['safety', 'recreation', 'convenience', 'utilities', 'services', 'accessibility']
             if v not in allowed_categories:
@@ -36,8 +38,7 @@ class AmenityInDB(AmenityBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Amenity(AmenityInDB):
     pass
@@ -51,5 +52,4 @@ class PropertyAmenityResponse(BaseModel):
     icon: Optional[str] = None
     category: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,10 +1,24 @@
 import os
 import logging
+import warnings
+
 import uvicorn
 from app.main import app
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# Suppress noisy third-party deprecation warnings (uvicorn/websockets)
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    module=r"websockets\.legacy.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=r".*WebSocketServerProtocol is deprecated.*",
+)
 
 # Set up basic logging before uvicorn takes over
 logging.basicConfig(level=logging.INFO)

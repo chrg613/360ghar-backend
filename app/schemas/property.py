@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator, ConfigDict, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.enums import PropertyType, PropertyPurpose, PropertyStatus
@@ -19,8 +19,7 @@ class PropertyImage(PropertyImageBase):
     id: int
     property_id: int
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PropertyBase(BaseModel):
     title: str
@@ -70,31 +69,35 @@ class PropertyCreate(PropertyBase):
     owner_contact: Optional[str] = None
     builder_name: Optional[str] = None
 
-    @validator('title')
-    def validate_title(cls, v):
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str) -> str:
         return ValidationUtils.sanitize_string(v, max_length=200)
     
-    @validator('description')
-    def validate_description(cls, v):
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
         if v:
             return ValidationUtils.sanitize_html(v)
         return v
     
-    @validator('base_price')
-    def validate_base_price(cls, v):
+    @field_validator("base_price")
+    @classmethod
+    def validate_base_price(cls, v: float) -> float:
         return ValidationUtils.validate_price(v, min_price=0, max_price=1e8)
     
-    @validator('longitude')
-    def validate_coordinates(cls, v, values):
-        if v is not None and 'latitude' in values and values['latitude'] is not None:
-            ValidationUtils.validate_coordinates(values['latitude'], v)
-        return v
-    
-    @validator('pincode')
-    def validate_pincode(cls, v):
+    @field_validator("pincode")
+    @classmethod
+    def validate_pincode(cls, v: Optional[str]) -> Optional[str]:
         if v:
             return ValidationUtils.validate_pincode(v)
         return v
+
+    @model_validator(mode="after")
+    def validate_coordinates(self):
+        if self.latitude is not None and self.longitude is not None:
+            ValidationUtils.validate_coordinates(self.latitude, self.longitude)
+        return self
     
 
 class PropertyUpdate(BaseModel):
@@ -137,8 +140,7 @@ class PropertyInDB(PropertyBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Property(PropertyInDB):
     images: Optional[List[PropertyImage]] = None
@@ -150,8 +152,7 @@ class Property(PropertyInDB):
     user_scheduled_visit_count: Optional[int] = None
     user_next_visit_date: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PropertyFilter(BaseModel):
     property_type: Optional[List[PropertyType]] = None

@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
@@ -14,6 +14,25 @@ class Settings(BaseSettings):
     SUPABASE_SECRET_KEY: str
     # API Keys for middleware (comma-separated)
     VALID_API_KEYS: str = ""
+    
+    # External AI/Search integrations
+    PERPLEXITY_API_KEY: Optional[str] = None
+    PERPLEXITY_MODEL: str = "sonar"
+    
+    # Image search via SerpAPI (Google Images)
+    SERPAPI_API_KEY: Optional[str] = None
+    SERPAPI_SEARCH_ENDPOINT: str = "https://serpapi.com/search.json"
+    
+    # Gemini embeddings
+    GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_EMBED_MODEL: str = "text-embedding-004"
+    
+    # Vector sync settings
+    VECTOR_SYNC_ENABLED: bool = False
+    VECTOR_SYNC_CRON: Optional[str] = None  # e.g., "*/5 * * * *"
+    VECTOR_SYNC_INTERVAL_SECONDS: int = 300  # used when CRON not provided
+    VECTOR_SYNC_BATCH_SIZE: int = 500
+    VECTOR_SYNC_MAX_RETRIES: int = 3
     
     @property
     def ASYNC_DATABASE_URL(self) -> str:
@@ -32,6 +51,14 @@ class Settings(BaseSettings):
     
     # Additional Supabase settings
     SUPABASE_STORAGE_BUCKET: str = "property-images"
+
+    # Firebase / FCM
+    FIREBASE_PROJECT_ID: str | None = None
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = None  # path to service account JSON
+
+    # Notifications / Scheduler
+    ENABLE_NOTIF_SCHEDULER: bool = False
+    NOTIF_SCHED_TZ: str = "Asia/Kolkata"
     
     # CORS settings
     CORS_ORIGINS: list = [
@@ -64,8 +91,9 @@ class Settings(BaseSettings):
         "https://admin.360ghar.com"
     ]
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
 
 settings = Settings()

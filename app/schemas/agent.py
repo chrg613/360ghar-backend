@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.enums import AgentType, ExperienceLevel
@@ -44,8 +44,7 @@ class Agent(AgentBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentStats(BaseModel):
     total_users_assigned: int
@@ -64,8 +63,7 @@ class AgentAssignment(BaseModel):
     assigned_at: datetime
     assignment_reason: Optional[str] = "auto_assigned"
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentInteraction(BaseModel):
     id: int
@@ -78,8 +76,7 @@ class AgentInteraction(BaseModel):
     user_satisfaction: Optional[int] = None  # 1-5 rating
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentPerformanceMetrics(BaseModel):
     agent_id: int
