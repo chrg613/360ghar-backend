@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.schemas.blog import BlogPostCreate
 from app.services.blog import create_blog_post
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -34,16 +35,25 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
     }
 
     system = (
-        "You are an expert real estate content strategist for the Gurgaon market. "
-        "Write SEO-optimized long-form blog posts with clear H2/H3 headings, short paragraphs, bullets, "
-        "data points where helpful, and an engaging tone. Always focus on real estate in Gurgaon. "
-        "Return ONLY valid JSON with keys: title, content_html. content_html must be sanitized HTML." 
+        "You are an expert real estate content strategist for Gurgaon, writing for 360 Ghar "
+        "(India's first VR-first real estate platform focused on verified, 360° virtual tours in Gurgaon). "
+        "Write SEO-optimized, long-form blog posts with clear H2/H3 headings, short paragraphs, bullets, "
+        "concrete local data/insights where helpful, and an engaging, trustworthy tone. "
+        "Emphasize 360° virtual walkthroughs, verified listings, reduced site visits, Relationship Managers, "
+        "and a modern, tech-enabled, broker-plus experience. Always stay focused on Gurgaon real estate. "
+        "Return ONLY a valid JSON object with exactly the keys: title, content_html. "
+        "Do NOT include markdown, code fences, or any explanation text around the JSON. "
+        "content_html should be well-structured HTML suitable for direct rendering in a blog CMS."
     )
 
     user_prompt = (
         f"Research and write a high-quality blog post about: '{topic}'. "
-        "Make it specific to Gurgaon real estate (India). Include: intro, key sections, insights, 4-6 FAQs, and a conclusion. "
-        "Use semantic headings and internal structure suitable for a CMS."
+        "Make it deeply specific to Gurgaon real estate (India) and the realities of buyers, tenants, and owners there in 2024/2025. "
+        "Incorporate where appropriate: immersive 360° virtual tours, verified listings, fewer wasted visits, "
+        "map-based discovery, and guided support from a Relationship Manager. "
+        "Structure the article with: a strong intro, 3–6 key sections with H2/H3s, bullets or numbered lists where useful, "
+        "4–6 Gurgaon-specific FAQs, and a clear conclusion with a soft CTA to explore homes on 360 Ghar. "
+        "Use clean semantic HTML tags only (p, h2, h3, ul, ol, li, a, strong, em, blockquote)."
     )
 
     payload = {
@@ -54,6 +64,23 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
             {"role": "system", "content": system},
             {"role": "user", "content": user_prompt},
         ],
+        # Always request structured JSON output via JSON Schema
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "blog_post",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "content_html": {"type": "string"},
+                    },
+                    "required": ["title", "content_html"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        },
     }
 
     async with httpx.AsyncClient(timeout=60) as client:
@@ -64,28 +91,33 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
 
         data = resp.json()
 
-    # Perplexity uses OpenAI-like schema; extract content string
+    # Perplexity uses OpenAI-like schema; extract structured JSON content
     try:
         content = data["choices"][0]["message"]["content"]
     except Exception:
         logger.error(f"Unexpected Perplexity response schema: {data}")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity response")
 
-    # Try to parse JSON content
     try:
         parsed = json.loads(content)
-        title = parsed.get("title")
-        content_html = parsed.get("content_html")
-    except Exception:
-        # Fallback: naive parsing – take first line as title, remainder as HTML
-        lines = (content or "").splitlines()
-        title = (lines[0] if lines else topic).strip().strip('"')
-        content_html = "\n".join(lines[1:]) or content
+    except Exception as e:
+        logger.error(f"Failed to parse Perplexity JSON content: {e} | content={content}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid JSON from Perplexity")
+
+    if not isinstance(parsed, dict):
+        logger.error(f"Perplexity JSON root is not an object: {parsed}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity JSON shape")
+
+    title = parsed.get("title")
+    content_html = parsed.get("content_html")
 
     if not title or not content_html:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Perplexity did not return content")
 
-    return {"title": title.strip(), "content_html": content_html}
+    # Final HTML sanitization for safety
+    safe_html = ValidationUtils.sanitize_html(content_html)
+
+    return {"title": title.strip(), "content_html": safe_html}
 
 
 async def _serpapi_image_search(query: str, count: int = 5) -> List[str]:
@@ -151,8 +183,9 @@ async def generate_draft_from_topic(db, *, topic: str, actor) -> Dict[str, Any]:
         content=content_html,
         excerpt=excerpt,
         cover_image_url=cover_image,
-        categories=["Gurgaon", "Real Estate"],
-        tags=["Gurgaon", "Real Estate"],
+        # Seed with brand- and city-aware categories/tags for 360 Ghar
+        categories=["Gurgaon", "Real Estate", "Virtual Tours", "360 Ghar"],
+        tags=["Gurgaon", "Real Estate", "Virtual Tours", "VR Real Estate", "360 Ghar"],
         active=False,
     )
 
@@ -173,13 +206,18 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
     }
 
     system = (
-        "You create topical content plans for Gurgaon real estate. "
-        "Return ONLY JSON array 'topics' with unique, specific blog topics."
+        "You create topical, SEO-aware content plans for Gurgaon-focused real estate blogs for 360 Ghar "
+        "(India's first VR-first real estate platform with verified 360° virtual tours, no duplicate/misleading listings, "
+        "and Relationship Manager support). "
+        "You always think from the lens of buyers, tenants, and property owners in Gurgaon in 2024/2025."
     )
     prompt = (
-        f"Generate {count} unique blog topics about real estate in Gurgaon. "
-        "Make them specific and current (2024/2025), diverse across buying, renting, luxury, investment, neighbourhoods, and legal. "
-        "Return JSON of the shape: {\"topics\": [\"...\"]}"
+        f"Generate {count} unique, high-intent blog topics about real estate in Gurgaon, India for 360 Ghar. "
+        "Cover a diverse mix across buying and selling, renting, luxury and premium housing, investment trends, "
+        "neighbourhood deep-dives (by sector/locality), legal and documentation guidance, and how VR/360° virtual tours "
+        "plus verified listings and Relationship Managers change the property search journey. "
+        "Each topic should be concise but specific (not just one-word), and sound natural for a blog article title. "
+        "Return a JSON object of the shape: {\"topics\": [\"topic 1\", \"topic 2\", ...]}."
     )
     payload = {
         "model": settings.PERPLEXITY_MODEL or "sonar",
@@ -189,6 +227,25 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
+        # Always request structured JSON output via JSON Schema
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "blog_topics",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "topics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        }
+                    },
+                    "required": ["topics"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        },
     }
 
     async with httpx.AsyncClient(timeout=45) as client:
@@ -200,12 +257,26 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
 
     try:
         content = data["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        topics = parsed.get("topics") or []
     except Exception:
-        logger.warning("Falling back to newline-split topics parsing")
-        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        topics = [t.strip("- •\n ") for t in text.splitlines() if t.strip()]
+        logger.error(f"Unexpected Perplexity response schema for topics: {data}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity response")
+
+    try:
+        parsed = json.loads(content)
+    except Exception as e:
+        logger.error(f"Failed to parse Perplexity topics JSON content: {e} | content={content}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid JSON from Perplexity")
+
+    if not isinstance(parsed, dict):
+        logger.error(f"Perplexity topics JSON root is not an object: {parsed}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity JSON shape")
+
+    raw_topics = parsed.get("topics") or []
+    if not isinstance(raw_topics, list):
+        logger.error(f"Perplexity topics JSON 'topics' is not a list: {parsed}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity topics JSON")
+
+    topics: List[str] = [str(t).strip() for t in raw_topics if str(t).strip()]
 
     # Deduplicate and cap to requested count
     uniq: List[str] = []
