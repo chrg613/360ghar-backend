@@ -22,40 +22,16 @@ from app.services.swipe import get_user_like_for_property
 router = APIRouter()
 logger = get_logger(__name__)
 
-@router.post("/", response_model=Property)
-async def create_new_property(
-    property_data: PropertyCreate,
-    owner_id: Optional[int] = Query(None, description="Owner id (admin/agent only)"),
-    current_user: UserSchema = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Create a new property (requires authentication)"""
-    logger.info(f"User {current_user.id} creating property of type {property_data.property_type}")
-    try:
-        # Determine owner
-        target_owner_id = current_user.id
-        if owner_id is not None:
-            # Only admins/agents may specify owner_id
-            if current_user.role in ('admin', 'agent'):
-                target_owner_id = owner_id
-            else:
-                raise HTTPException(status_code=403, detail="Only admins or agents can set owner_id")
-        result = await create_property(db, property_data, target_owner_id, current_user)
-        logger.info(f"Property created successfully with ID {result.id}")
-        return result
-    except Exception as e:
-        logger.error(f"Failed to create property for user {current_user.id}: {str(e)}")
-        raise
 
-@router.get("/", response_model=UnifiedPropertyResponse)
-async def get_properties_list(
+def build_property_filters(
     # Query parameters for filtering
     lat: Optional[float] = Query(None, description="Latitude for location-based search"),
     lng: Optional[float] = Query(None, description="Longitude for location-based search"),
     radius: int = Query(5, ge=1, le=100, description="Search radius in km"),
     
     # Search query
-    q: Optional[str] = Query(None, description="Search query for text search"),
+    q: Optional[str] = Query(None, description="Search query for text or semantic search"),
+    semantic_search: bool = Query(False, description="Enable semantic vector similarity search"),
     
     # Property filters
     property_type: Optional[List[PropertyType]] = Query(None),
@@ -93,31 +69,14 @@ async def get_properties_list(
     check_out: Optional[str] = Query(None, description="Check-out date (YYYY-MM-DD)"),
     guests: Optional[int] = Query(None, ge=1, le=20),
     
-    # Sorting and pagination
+    # Sorting
     sort_by: SortBy = Query(SortBy.newest, description="Sort by: distance, price_low, price_high, newest, popular, relevance"),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
     
     # Auth-aware filters
     exclude_swiped: bool = Query(False, description="Exclude properties already swiped by the authenticated user"),
-    
-    # Optional authentication
-    current_user: Optional[UserSchema] = Depends(get_current_user_optional),
-    db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get properties with comprehensive filtering and optional authentication.
-    
-    This endpoint supports:
-    - Location-based search (lat/lng + radius)
-    - Text search (q parameter)
-    - Comprehensive property filtering
-    - Multiple sorting options
-    - Optional user authentication
-    - Auth-aware filter: exclude swiped properties when `exclude_swiped=true`
-    """
-    # Build filters
-    filters = UnifiedPropertyFilter(
+    """Common dependency to build UnifiedPropertyFilter from query params."""
+    return UnifiedPropertyFilter(
         latitude=lat,
         longitude=lng,
         radius_km=radius,
@@ -145,33 +104,121 @@ async def get_properties_list(
         check_out_date=check_out,
         guests=guests,
         sort_by=sort_by,
-        exclude_swiped=exclude_swiped
+        exclude_swiped=exclude_swiped,
+        semantic_search=semantic_search
     )
+
+
+def _build_response_payload(result: dict, filters: UnifiedPropertyFilter, page: int, limit: int):
+    return {
+        "properties": result.get("items", []),
+        "total": result.get("total", 0),
+        "page": page,
+        "limit": limit,
+        "total_pages": result.get("total_pages", 0),
+        "filters_applied": filters.model_dump(exclude_none=True),
+        "search_center": ({"latitude": filters.latitude, "longitude": filters.longitude} if filters.latitude is not None and filters.longitude is not None else None)
+    }
+
+@router.post("/", response_model=Property)
+async def create_new_property(
+    property_data: PropertyCreate,
+    owner_id: Optional[int] = Query(None, description="Owner id (admin/agent only)"),
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new property (requires authentication)"""
+    logger.info(f"User {current_user.id} creating property of type {property_data.property_type}")
+    try:
+        # Determine owner
+        target_owner_id = current_user.id
+        if owner_id is not None:
+            # Only admins/agents may specify owner_id
+            if current_user.role in ('admin', 'agent'):
+                target_owner_id = owner_id
+            else:
+                raise HTTPException(status_code=403, detail="Only admins or agents can set owner_id")
+        result = await create_property(db, property_data, target_owner_id, current_user)
+        logger.info(f"Property created successfully with ID {result.id}")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to create property for user {current_user.id}: {str(e)}")
+        raise
+
+@router.get("/", response_model=UnifiedPropertyResponse)
+async def get_properties_list(
+    filters: UnifiedPropertyFilter = Depends(build_property_filters),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: Optional[UserSchema] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get properties with comprehensive filtering and optional authentication.
+    
+    This endpoint supports:
+    - Location-based search (lat/lng + radius)
+    - Text search (q parameter) and optional semantic search (`semantic_search=true`)
+    - Comprehensive property filtering
+    - Multiple sorting options
+    - Optional user authentication
+    - Auth-aware filter: exclude swiped properties when `exclude_swiped=true`
+    """
+    if filters.semantic_search and not filters.search_query:
+        raise HTTPException(status_code=400, detail="semantic_search requires a search query (q)")
     
     # Use user_id if authenticated, otherwise use None
     user_id = current_user.id if current_user else None
     
     # Log search request
-    logger.info(f"Property search request - user: {user_id or 'anonymous'}, filters: {len([f for f in [q, lat, lng, property_type, city] if f])}, page: {page}")
+    logger.info(
+        "Property search request",
+        extra={
+            "user": user_id or "anonymous",
+            "has_semantic": filters.semantic_search,
+            "query": filters.search_query,
+            "page": page,
+            "radius": filters.radius_km,
+        },
+    )
     
     try:
         result = await get_unified_properties_optimized(db, filters, user_id, page, limit)
         
         logger.info(f"Property search completed - found {result.get('total', 0)} properties, returning page {page}")
         
-        # Adapt repository response to UnifiedPropertyResponse shape
-        return {
-            "properties": result.get("items", []),
-            "total": result.get("total", 0),
-            "page": page,
-            "limit": limit,
-            "total_pages": result.get("total_pages", 0),
-            "filters_applied": filters.model_dump(exclude_none=True),
-            "search_center": ({"latitude": lat, "longitude": lng} if lat is not None and lng is not None else None)
-        }
+        return _build_response_payload(result, filters, page, limit)
     except Exception as e:
         logger.error(f"Property search failed for user {user_id or 'anonymous'}: {str(e)}")
         raise
+
+
+@router.get("/semantic-search", response_model=UnifiedPropertyResponse)
+async def semantic_property_search(
+    filters: UnifiedPropertyFilter = Depends(build_property_filters),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: Optional[UserSchema] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Perform semantic (vector-powered) property search.
+    Combines vector similarity with traditional filters and returns relevance scores.
+    """
+    if not filters.search_query:
+        raise HTTPException(status_code=400, detail="A search query (q) is required for semantic search")
+
+    filters.semantic_search = True
+    filters.sort_by = SortBy.relevance
+    user_id = current_user.id if current_user else None
+    
+    logger.info(
+        "Semantic property search request",
+        extra={"user": user_id or "anonymous", "query": filters.search_query, "page": page},
+    )
+
+    result = await get_unified_properties_optimized(db, filters, user_id, page, limit)
+    return _build_response_payload(result, filters, page, limit)
 
 @router.get("/recommendations/")
 async def get_recommendations(

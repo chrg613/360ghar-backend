@@ -9,10 +9,18 @@ from app.schemas.booking import (
 )
 from app.schemas.common import MessageResponse
 from app.services.booking import (
-    create_booking, get_booking, get_user_bookings, update_booking,
-    cancel_booking, process_payment, add_review, check_availability,
-    calculate_pricing, get_all_bookings
+    create_booking,
+    get_booking,
+    get_user_bookings,
+    update_booking,
+    cancel_booking,
+    process_payment,
+    add_review,
+    check_availability,
+    calculate_pricing,
+    get_all_bookings,
 )
+from app.services.notification_dispatcher import dispatch_notification_to_user
 
 router = APIRouter()
 
@@ -155,7 +163,25 @@ async def process_booking_payment(
     success = await process_payment(db, payment_data)
     if not success:
         raise HTTPException(status_code=400, detail="Payment processing failed")
-    
+
+    # Send booking confirmation notification via multi-channel dispatcher
+    try:
+        await dispatch_notification_to_user(
+            db,
+            user_db_id=booking.user_id,
+            type_key="booking_confirmed",
+            title="Booking confirmed",
+            body=f"Your booking {booking.booking_reference} has been confirmed.",
+            data={
+                "booking_id": str(booking.id),
+                "booking_reference": booking.booking_reference,
+                "property_id": str(booking.property_id),
+            },
+        )
+    except Exception:
+        # Notification failures should not break payment flow
+        pass
+
     return MessageResponse(message="Payment processed successfully")
 
 @router.post("/review/", response_model=MessageResponse)

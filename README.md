@@ -18,6 +18,7 @@ A high-performance, modern backend for a Tinder-like real estate platform. Built
 - [Running with Docker](#running-with-docker)
 - [Environment Configuration](#environment-configuration)
 - [API Documentation](#api-documentation)
+- [MCP HTTP Server](#mcp-http-server)
 - [Key Implementation Details](#key-implementation-details)
 - [Contributing](#contributing)
 - [License](#license)
@@ -205,6 +206,32 @@ The API will be available at `http://localhost:8000`.
 
 > **💡 Development Tip**: FastAPI CLI provides better hot reload performance and additional development features. It's the recommended way for active development.
 
+## MCP HTTP Server
+
+The backend exposes a Model Context Protocol (MCP) HTTP server for AI assistants and MCP‑aware clients.
+
+- **Endpoint:** `http://localhost:8000/mcp` (dev) and `https://api.360ghar.com/mcp` (production).
+- **Transport:** Streamable HTTP with OAuth 2.1 authentication (phone + password via Supabase).
+- **OAuth endpoints:**  
+  - Authorization: `GET /mcp/oauth/authorize` (browser-based login + consent page)  
+  - Token: `POST /mcp/oauth/token`  
+  - Authorization server metadata: `GET /.well-known/oauth-authorization-server/mcp/oauth`
+
+To connect from a compatible MCP client, configure:
+
+```json
+{
+  "mcpServers": {
+    "ghar360": {
+      "transport": "http",
+      "url": "https://api.360ghar.com/mcp"
+    }
+  }
+}
+```
+
+After configuration, the client will initiate an OAuth flow in the browser; once authorized, it can call tools such as property search, swipes, and visit scheduling over MCP.
+
 ## Running with Docker
 
 To run the entire stack in containers:
@@ -242,6 +269,31 @@ SENTRY_DSN=your_sentry_dsn_here
 
 # Environment
 ENVIRONMENT=development
+ 
+# Push Notifications (FCM + Supabase)
+FIREBASE_PROJECT_ID=your_firebase_project_id
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+ENABLE_NOTIF_SCHEDULER=false
+NOTIF_SCHED_TZ=Asia/Kolkata
+
+# Vector Embeddings / Semantic Search
+GOOGLE_API_KEY=
+GEMINI_EMBED_MODEL=text-embedding-004
+VECTOR_SYNC_ENABLED=true
+# Either provide CRON schedule or interval seconds (defaults to CRON below)
+VECTOR_SYNC_CRON=*/10 * * * *
+VECTOR_SYNC_INTERVAL_SECONDS=300
+VECTOR_SYNC_BATCH_SIZE=500
+VECTOR_SYNC_MAX_RETRIES=3
+
+### One-time backfill
+Run a single incremental sync pass (first run will process all properties):
+
+```
+python -m app.vector.backfill
+```
+
+The service creates a `property_embeddings` table (pgvector) and tracks incremental progress in `vector_sync_state`.
 ```
 
 ## API Documentation
@@ -255,6 +307,15 @@ Once running, access the interactive API documentation:
 Additional endpoints:
 - **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
 - **Config Info**: [http://localhost:8000/config](http://localhost:8000/config)
+
+### Notifications API
+
+- `POST /api/v1/notifications/devices/register` — Register or refresh device token (uses auth header when present)
+- `POST /api/v1/notifications/send/token` — Send to a single token (admin only)
+- `POST /api/v1/notifications/send/user` — Send to all tokens for a user (admin only)
+- `POST /api/v1/notifications/send/topic` — Broadcast to an FCM topic (admin only)
+- `POST /api/v1/notifications/send/bulk` — Bulk send to up to 500 tokens (admin only)
+- `POST /api/v1/notifications/deliveries/{delivery_id}/opened` — Mark a delivery as opened
 
 ## Key Implementation Details
 
@@ -275,8 +336,10 @@ Additional endpoints:
 - **Unified Search Endpoint**: Single endpoint supporting multiple search types
 - **Geospatial Optimization**: PostGIS `ST_DWithin` for radius-based searches
 - **Full-Text Search**: PostgreSQL TSVECTOR for relevant text matching
+- **Semantic Search**: Hybrid vector + text relevance scoring for richer discovery
 - **Advanced Filtering**: Support for 25+ property filters
 - **Pagination**: Efficient cursor-based pagination for large datasets
+- **Endpoints**: `GET /api/v1/properties` (set `semantic_search=true&q=` for hybrid) and `GET /api/v1/properties/semantic-search` (pure semantic + filters)
 
 ### Agent Management
 - **Auto-Assignment**: Round-robin agent assignment based on workload

@@ -1,11 +1,36 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, update
+from sqlalchemy import (
+    select,
+    func,
+    and_,
+    update,
+    Table,
+    Column,
+    Integer,
+    bindparam,
+    MetaData,
+)
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
+from pgvector.sqlalchemy import Vector
 from app.models.properties import Property, PropertyAmenity, Amenity
 from app.schemas.property import PropertyCreate, PropertyUpdate, UnifiedPropertyFilter, SortBy
 from app.schemas.user import User as UserSchema
 from app.core.logging import get_logger
+from app.vector.embedding_client import embed_query
+
+vector_metadata = MetaData()
+property_embeddings_table = Table(
+    "property_embeddings",
+    vector_metadata,
+    Column("property_id", Integer, primary_key=True),
+    Column("embedding", Vector(768)),
+    schema="public",
+)
+
+# Default weights for hybrid relevance scoring
+VECTOR_WEIGHT = 0.6
+TEXT_WEIGHT = 0.4
 
 logger = get_logger(__name__)
 
@@ -183,6 +208,13 @@ async def get_unified_properties_optimized(
         
         # Build base conditions
         conditions = []
+        text_filter_applied = False
+        has_additional_columns = False
+        semantic_enabled = bool(getattr(filters, "semantic_search", False) and filters.search_query)
+        semantic_embedding = None
+        vector_distance_expr = None
+        combined_relevance_expr = None
+        text_rank_expr = None
         
         # Always filter by availability unless explicitly requested
         if not filters.include_unavailable:
@@ -205,9 +237,11 @@ async def get_unified_properties_optimized(
             # Calculate distance for ordering and display, converting from meters to km.
             distance = func.ST_Distance(Property.location, user_location) / 1000
             query = query.add_columns(distance.label('distance_km'))
+            has_additional_columns = True
         
         # Text search using PostgreSQL full-text search with GIN index
         search_query_obj = None
+        search_vector = None
         if filters.search_query:
             logger.debug(f"Adding full-text search filter: {filters.search_query}")
             
@@ -221,7 +255,11 @@ async def get_unified_properties_optimized(
                 Property.locality, ' ',
                 Property.city
             ))
-            conditions.append(search_vector.op('@@')(search_query_obj))
+            # Only hard-filter by text match when semantic search is not requested
+            if not semantic_enabled:
+                conditions.append(search_vector.op('@@')(search_query_obj))
+                text_filter_applied = True
+            text_rank_expr = func.ts_rank(search_vector, search_query_obj)
         
         # Property type filter - handle list of property types
         if filters.property_type:
@@ -347,6 +385,47 @@ async def get_unified_properties_optimized(
             from app.models.users import UserSwipe
             swiped_subquery = select(UserSwipe.property_id).where(UserSwipe.user_id == user_id)
             conditions.append(~Property.id.in_(swiped_subquery))
+
+        # Prepare semantic embedding if requested; fall back to text search on failure
+        if semantic_enabled and filters.search_query:
+            try:
+                vector_vals = await embed_query(filters.search_query)
+                if vector_vals:
+                    semantic_embedding = vector_vals[0] if isinstance(vector_vals[0], list) else vector_vals
+                else:
+                    semantic_enabled = False
+                    logger.warning("Semantic search requested but embedding service returned no vector")
+            except Exception as e:
+                semantic_enabled = False
+                logger.error(f"Semantic embedding generation failed, falling back to text search: {str(e)}")
+
+        if search_query_obj is not None and not text_filter_applied and not semantic_enabled:
+            conditions.append(search_vector.op('@@')(search_query_obj))
+            text_filter_applied = True
+
+        if semantic_enabled and semantic_embedding:
+            query = query.outerjoin(
+                property_embeddings_table,
+                property_embeddings_table.c.property_id == Property.id
+            )
+            count_query = count_query.outerjoin(
+                property_embeddings_table,
+                property_embeddings_table.c.property_id == Property.id
+            )
+
+            query_vector_param = bindparam("query_vector", value=semantic_embedding, type_=Vector(768))
+            vector_distance_expr = func.coalesce(
+                property_embeddings_table.c.embedding.cosine_distance(query_vector_param),
+                2.0
+            )
+            vector_score_expr = 1.0 / (1.0 + vector_distance_expr)
+            text_component = func.coalesce(text_rank_expr, 0.0) if text_rank_expr is not None else 0.0
+            combined_relevance_expr = (VECTOR_WEIGHT * vector_score_expr) + (TEXT_WEIGHT * text_component)
+            query = query.add_columns(
+                vector_distance_expr.label("vector_distance"),
+                combined_relevance_expr.label("relevance_score"),
+            )
+            has_additional_columns = True
         
         # Apply all conditions
         if conditions:
@@ -355,8 +434,9 @@ async def get_unified_properties_optimized(
         
         # Apply sorting - use distance only if location is provided
         sort_by = filters.sort_by
+        if semantic_enabled and sort_by in (SortBy.distance, SortBy.newest):
+            sort_by = SortBy.relevance
         if sort_by is None:
-            # Default to distance if location is provided, otherwise newest
             sort_by = SortBy.distance if (filters.latitude and filters.longitude) else SortBy.newest
         
         if sort_by == SortBy.distance and distance is not None:
@@ -370,17 +450,16 @@ async def get_unified_properties_optimized(
         elif sort_by == SortBy.popular:
             # Sort by like count, then view count
             query = query.order_by(Property.like_count.desc(), Property.view_count.desc())
-        elif sort_by == SortBy.relevance and search_query_obj is not None:
-            # Sort by text search relevance using ts_rank
-            # Calculate relevance score using SQLAlchemy functions
-            search_vector = func.to_tsvector('english', func.concat(
-                Property.title, ' ',
-                Property.description, ' ',
-                Property.locality, ' ',
-                Property.city
-            ))
-            relevance_score = func.ts_rank(search_vector, search_query_obj)
-            query = query.order_by(relevance_score.desc())
+        elif sort_by == SortBy.relevance:
+            if combined_relevance_expr is not None:
+                query = query.order_by(combined_relevance_expr.desc())
+            elif text_rank_expr is not None:
+                query = query.order_by(text_rank_expr.desc())
+            elif search_query_obj is not None and search_vector is not None:
+                fallback_rank = func.ts_rank(search_vector, search_query_obj)
+                query = query.order_by(fallback_rank.desc())
+            else:
+                query = query.order_by(Property.created_at.desc())
         else:
             # Default sorting
             query = query.order_by(Property.created_at.desc())
@@ -392,13 +471,23 @@ async def get_unified_properties_optimized(
         result = await db.execute(query)
         count_result = await db.execute(count_query)
         
-        # Handle results - check if we have additional columns (distance)
-        if distance is not None:
+        properties = []
+        if has_additional_columns:
             rows = result.all()
-            properties = [row[0] for row in rows]  # First column is the Property object
-            
-            # Additional computed columns (distance_km) can be extracted here if needed
-            # For now, we just extract the property objects
+            for row in rows:
+                mapping = row._mapping if hasattr(row, "_mapping") else {}
+                prop = mapping.get("Property") or mapping.get(Property)
+                if prop is None:
+                    prop = row[0] if isinstance(row, tuple) and len(row) > 0 else row
+                if mapping and prop:
+                    if "distance_km" in mapping and mapping["distance_km"] is not None:
+                        setattr(prop, "distance_km", mapping["distance_km"])
+                    if "vector_distance" in mapping and mapping["vector_distance"] is not None:
+                        setattr(prop, "vector_distance", mapping["vector_distance"])
+                    if "relevance_score" in mapping and mapping["relevance_score"] is not None:
+                        setattr(prop, "relevance_score", mapping["relevance_score"])
+                if prop:
+                    properties.append(prop)
         else:
             properties = result.scalars().all()
         

@@ -4,10 +4,20 @@ from app.core.database import get_db
 from app.api.api_v1.endpoints.auth import get_current_active_user
 from app.api.api_v1.dependencies.auth import get_current_admin, get_current_agent
 from app.schemas.user import UserUpdate, User as UserSchema, UserPreferences, LocationUpdate
-from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.common import (
+    MessageResponse,
+    PaginatedResponse,
+    NotificationSettings,
+    PrivacySettings,
+)
 from app.services.user import (
-    update_user, update_user_preferences, update_user_location,
-    get_all_users, get_user_by_id
+    update_user,
+    update_user_location,
+    update_user_preferences,
+    update_user_notification_settings,
+    update_user_privacy_settings,
+    get_all_users,
+    get_user_by_id,
 )
 from app.services.agent import assign_agent_to_user
 
@@ -54,6 +64,92 @@ async def update_location(
         location_update.longitude
     )
     return MessageResponse(message="Location updated successfully")
+
+
+@router.get("/notification-settings", response_model=NotificationSettings)
+async def get_notification_settings(
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationSettings:
+    """Return the current user's notification settings.
+
+    Falls back to defaults defined in NotificationSettings when no
+    explicit settings are stored.
+    """
+    user = await get_user_by_id(db, current_user.id)
+    # user.notification_settings is stored as JSON; merge with defaults
+    raw = (user.notification_settings or {}) if user else {}
+    return NotificationSettings(**raw)
+
+
+@router.put("/notification-settings", response_model=MessageResponse)
+async def update_notification_settings(
+    settings: NotificationSettings,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Update the current user's notification settings (360 Ghar app)."""
+    await update_user_notification_settings(
+        db,
+        current_user.id,
+        settings.model_dump(by_alias=True, exclude_none=True),
+    )
+    return MessageResponse(message="Notification settings updated successfully")
+
+
+@router.put("/notifications/", response_model=UserSchema)
+async def update_notifications_compat(
+    settings: dict,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserSchema:
+    """Compatibility endpoint for the stays app.
+
+    Accepts an arbitrary JSON object and stores it in users.notification_settings.
+    """
+    user = await update_user_notification_settings(db, current_user.id, settings)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    from app.schemas.user import User as UserSchemaModel
+
+    return UserSchemaModel.model_validate(user)
+
+
+@router.get("/privacy-settings", response_model=PrivacySettings)
+async def get_privacy_settings(
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> PrivacySettings:
+    """Return the current user's privacy settings."""
+    user = await get_user_by_id(db, current_user.id)
+    raw = (user.privacy_settings or {}) if user else {}
+    return PrivacySettings(**raw)
+
+
+@router.put("/privacy-settings", response_model=MessageResponse)
+async def update_privacy_settings(
+    settings: PrivacySettings,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Update the current user's privacy settings (360 Ghar app)."""
+    await update_user_privacy_settings(db, current_user.id, settings.model_dump())
+    return MessageResponse(message="Privacy settings updated successfully")
+
+
+@router.put("/privacy/", response_model=UserSchema)
+async def update_privacy_compat(
+    settings: dict,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserSchema:
+    """Compatibility endpoint for the stays app privacy settings."""
+    user = await update_user_privacy_settings(db, current_user.id, settings)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    from app.schemas.user import User as UserSchemaModel
+
+    return UserSchemaModel.model_validate(user)
 
 
 # Admin/Agent management endpoints

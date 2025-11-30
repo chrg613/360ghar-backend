@@ -1,0 +1,128 @@
+"""
+Error response schemas and utilities for MCP tools.
+
+Provides standardized error handling and response formats for all MCP tools.
+"""
+from enum import Enum
+from typing import Any, Dict, Optional
+from pydantic import BaseModel
+
+
+class MCPErrorCode(str, Enum):
+    """Standard error codes for MCP tools."""
+    
+    # Authentication & Authorization
+    UNAUTHORIZED = "UNAUTHORIZED"
+    INVALID_TOKEN = "INVALID_TOKEN"
+    TOKEN_EXPIRED = "TOKEN_EXPIRED"
+    INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
+    
+    # Input Validation
+    INVALID_INPUT = "INVALID_INPUT"
+    MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
+    INVALID_PARAMETER = "INVALID_PARAMETER"
+    
+    # Resource Errors
+    NOT_FOUND = "NOT_FOUND"
+    ALREADY_EXISTS = "ALREADY_EXISTS"
+    CONFLICT = "CONFLICT"
+    
+    # Business Logic Errors
+    UNAVAILABLE = "UNAVAILABLE"
+    OPERATION_FAILED = "OPERATION_FAILED"
+    BOOKING_CONFLICT = "BOOKING_CONFLICT"
+    INVALID_DATE_RANGE = "INVALID_DATE_RANGE"
+    
+    # System Errors
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    DATABASE_ERROR = "DATABASE_ERROR"
+    EXTERNAL_SERVICE_ERROR = "EXTERNAL_SERVICE_ERROR"
+    
+    # Rate Limiting
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+
+
+class MCPError(BaseModel):
+    """Structured error response for MCP tools."""
+    
+    code: MCPErrorCode
+    message: str
+    details: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        use_enum_values = True
+
+
+class MCPResponse(BaseModel):
+    """Standardized response format for MCP tools."""
+    
+    ok: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[MCPError] = None
+    
+    @classmethod
+    def success(cls, data: Dict[str, Any]) -> "MCPResponse":
+        """Create a success response."""
+        return cls(ok=True, data=data, error=None)
+    
+    @classmethod
+    def failure(
+        cls,
+        code: MCPErrorCode,
+        message: str,
+        details: Optional[Dict[str, Any]] = None
+    ) -> "MCPResponse":
+        """Create an error response."""
+        return cls(
+            ok=False,
+            data=None,
+            error=MCPError(code=code, message=message, details=details)
+        )
+    
+    def dict(self, *args, **kwargs) -> Dict[str, Any]:
+        """Override dict to exclude None values."""
+        d = super().dict(*args, **kwargs)
+        return {k: v for k, v in d.items() if v is not None}
+
+
+def unauthorized_response(message: str = "Authentication required") -> Dict[str, Any]:
+    """Helper to create unauthorized response."""
+    return MCPResponse.failure(
+        code=MCPErrorCode.UNAUTHORIZED,
+        message=message
+    ).dict()
+
+
+def invalid_input_response(
+    message: str,
+    details: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Helper to create invalid input response."""
+    return MCPResponse.failure(
+        code=MCPErrorCode.INVALID_INPUT,
+        message=message,
+        details=details
+    ).dict()
+
+
+def not_found_response(
+    resource: str,
+    resource_id: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Helper to create not found response."""
+    message = f"{resource} not found"
+    if resource_id:
+        message += f" (id: {resource_id})"
+    
+    return MCPResponse.failure(
+        code=MCPErrorCode.NOT_FOUND,
+        message=message
+    ).dict()
+
+
+def internal_error_response(message: str = "Internal server error") -> Dict[str, Any]:
+    """Helper to create internal error response."""
+    return MCPResponse.failure(
+        code=MCPErrorCode.INTERNAL_ERROR,
+        message=message
+    ).dict()

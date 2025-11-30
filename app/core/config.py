@@ -1,5 +1,10 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
@@ -28,8 +33,8 @@ class Settings(BaseSettings):
     GEMINI_EMBED_MODEL: str = "text-embedding-004"
     
     # Vector sync settings
-    VECTOR_SYNC_ENABLED: bool = False
-    VECTOR_SYNC_CRON: Optional[str] = None  # e.g., "*/5 * * * *"
+    VECTOR_SYNC_ENABLED: bool = True
+    VECTOR_SYNC_CRON: Optional[str] = "*/10 * * * *"  # every 10 minutes by default
     VECTOR_SYNC_INTERVAL_SECONDS: int = 300  # used when CRON not provided
     VECTOR_SYNC_BATCH_SIZE: int = 500
     VECTOR_SYNC_MAX_RETRIES: int = 3
@@ -59,6 +64,19 @@ class Settings(BaseSettings):
     # Notifications / Scheduler
     ENABLE_NOTIF_SCHEDULER: bool = False
     NOTIF_SCHED_TZ: str = "Asia/Kolkata"
+
+    # Email notifications (generic provider config)
+    EMAIL_SENDER_ADDRESS: Optional[str] = None
+    EMAIL_SENDER_NAME: Optional[str] = None
+    EMAIL_SMTP_HOST: Optional[str] = None
+    EMAIL_SMTP_PORT: int = 587
+    EMAIL_SMTP_USERNAME: Optional[str] = None
+    EMAIL_SMTP_PASSWORD: Optional[str] = None
+
+    # SMS notifications (generic provider config)
+    SMS_PROVIDER_API_URL: Optional[str] = None
+    SMS_PROVIDER_API_KEY: Optional[str] = None
+    SMS_SENDER_ID: Optional[str] = None
     
     # CORS settings
     CORS_ORIGINS: list = [
@@ -92,7 +110,7 @@ class Settings(BaseSettings):
     ]
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         case_sensitive=True,
     )
 

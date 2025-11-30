@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import Field
@@ -52,6 +52,21 @@ class NotificationSettings(BaseModel):
     visit_reminders: bool = True
     property_updates: bool = True
     promotional_emails: bool = False
+    onboarding: bool = True
+    digest: bool = True
+    frequency: Optional[str] = None
+    quiet_hours: Optional[Dict[str, str]] = Field(default=None, alias="quietHours")
+    categories: Dict[str, bool] = Field(
+        default_factory=lambda: {
+            "promotions": True,
+            "onboarding": True,
+            "property_updates": True,
+            "digest": True,
+            "visit_reminders": True,
+        }
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 class PrivacySettings(BaseModel):
     profile_visibility: str = "public"  # public, private

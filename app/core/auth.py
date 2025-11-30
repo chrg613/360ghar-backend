@@ -10,6 +10,7 @@ logger = get_logger(__name__)
 
 # Supabase client for auth only
 _supabase_client: Client = None
+_supabase_service_client: Client = None
 
 def get_supabase_auth_client() -> Client:
     """Get Supabase client for authentication only"""
@@ -17,6 +18,13 @@ def get_supabase_auth_client() -> Client:
     if _supabase_client is None:
         _supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
     return _supabase_client
+
+def get_supabase_service_client() -> Client:
+    """Get Supabase client using service role key for server-side DB ops"""
+    global _supabase_service_client
+    if _supabase_service_client is None:
+        _supabase_service_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SECRET_KEY)
+    return _supabase_service_client
 
 async def verify_supabase_token(token: str) -> Optional[Dict[str, Any]]:
     """Verify Supabase JWT token"""

@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Dict, Optional, Set
+
+
+class NotificationChannel(str, Enum):
+    IN_APP = "in_app"
+    PUSH = "push"
+    EMAIL = "email"
+    SMS = "sms"
+
+
+class NotificationCategory(str, Enum):
+    TRANSACTIONAL = "transactional"
+    SYSTEM = "system"
+    MARKETING = "marketing"
+
+
+class NotificationPriority(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass(frozen=True)
+class FrequencyCap:
+    """Simple per-user frequency cap for a notification type."""
+
+    per_day: Optional[int] = None
+    per_week: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class NotificationTypeConfig:
+    """Configuration for a logical notification type.
+
+    This defines how a given type should behave across channels and
+    is used by the notification service when dispatching events.
+    """
+
+    key: str
+    category: NotificationCategory
+    priority: NotificationPriority
+    allowed_channels: Set[NotificationChannel] = field(default_factory=set)
+    default_ttl_seconds: int = 24 * 3600
+    frequency_cap: Optional[FrequencyCap] = None
+    # Optional key inside users.notification_settings JSON that must be truthy
+    # for this type to be sent on marketing channels.
+    marketing_opt_in_key: Optional[str] = None
+
+
+NOTIFICATION_TYPES: Dict[str, NotificationTypeConfig] = {
+    # Transactional / event-based
+    "booking_confirmed": NotificationTypeConfig(
+        key="booking_confirmed",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=3 * 24 * 3600,
+    ),
+    "payment_failed": NotificationTypeConfig(
+        key="payment_failed",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.CRITICAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+            NotificationChannel.SMS,
+        },
+        default_ttl_seconds=2 * 24 * 3600,
+    ),
+    "document_approved": NotificationTypeConfig(
+        key="document_approved",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+    ),
+    "chat_message": NotificationTypeConfig(
+        key="chat_message",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=12 * 3600,
+        frequency_cap=FrequencyCap(per_day=None),
+    ),
+    # System / important alerts
+    "password_changed": NotificationTypeConfig(
+        key="password_changed",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.CRITICAL,
+        allowed_channels={
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "security_alert": NotificationTypeConfig(
+        key="security_alert",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.CRITICAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+            NotificationChannel.SMS,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "app_update": NotificationTypeConfig(
+        key="app_update",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.IN_APP,
+            NotificationChannel.PUSH,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "policy_update": NotificationTypeConfig(
+        key="policy_update",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=30 * 24 * 3600,
+    ),
+    # Marketing / lifecycle
+    "promotion_generic": NotificationTypeConfig(
+        key="promotion_generic",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=5 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=2, per_week=7),
+        marketing_opt_in_key="promotions",
+    ),
+    "discount_offer": NotificationTypeConfig(
+        key="discount_offer",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+            NotificationChannel.SMS,
+        },
+        default_ttl_seconds=3 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=1, per_week=3),
+        marketing_opt_in_key="promotions",
+    ),
+    "win_back": NotificationTypeConfig(
+        key="win_back",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=14 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=1, per_week=2),
+        marketing_opt_in_key="promotions",
+    ),
+    "upsell_suggestion": NotificationTypeConfig(
+        key="upsell_suggestion",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=3 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=3, per_week=10),
+        marketing_opt_in_key="promotions",
+    ),
+    "onboarding_nudge": NotificationTypeConfig(
+        key="onboarding_nudge",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+            NotificationChannel.EMAIL,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=1, per_week=3),
+        marketing_opt_in_key="onboarding",
+    ),
+    "visit_reminder": NotificationTypeConfig(
+        key="visit_reminder",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.SMS,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=24 * 3600,
+    ),
+    "property_recommendation": NotificationTypeConfig(
+        key="property_recommendation",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+            NotificationChannel.EMAIL,
+        },
+        default_ttl_seconds=3 * 24 * 3600,
+        frequency_cap=FrequencyCap(per_day=3, per_week=10),
+        marketing_opt_in_key="property_updates",
+    ),
+    "daily_digest": NotificationTypeConfig(
+        key="daily_digest",
+        category=NotificationCategory.MARKETING,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=48 * 3600,
+        frequency_cap=FrequencyCap(per_day=1, per_week=7),
+        marketing_opt_in_key="digest",
+    ),
+    # Fallback type for ad-hoc admin-triggered notifications
+    "admin_broadcast": NotificationTypeConfig(
+        key="admin_broadcast",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+}
+

@@ -274,3 +274,51 @@ async def update_user_location(db: AsyncSession, user_id: int, latitude: float, 
     except Exception as e:
         logger.error(f"Failed to update location for user {user_id}: {str(e)}", exc_info=True)
         raise
+
+
+async def update_user_notification_settings(
+    db: AsyncSession,
+    user_id: int,
+    settings: dict,
+) -> Optional[User]:
+    logger.info(f"Updating notification settings for user {user_id}")
+    try:
+        user = await db.get(User, user_id)
+        if user:
+            user.notification_settings = settings
+            await db.flush()
+            await db.refresh(user)
+            logger.info(f"Notification settings updated for user {user_id}")
+        else:
+            logger.warning(f"User {user_id} not found for notification settings update")
+        return user
+    except Exception as e:
+        logger.error(
+            f"Failed to update notification settings for user {user_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise
+
+
+async def update_user_privacy_settings(
+    db: AsyncSession,
+    user_id: int,
+    settings: dict,
+) -> Optional[User]:
+    logger.info(f"Updating privacy settings for user {user_id}")
+    try:
+        user = await db.get(User, user_id)
+        if user:
+            user.privacy_settings = settings
+            await db.flush()
+            await db.refresh(user)
+            logger.info(f"Privacy settings updated for user {user_id}")
+        else:
+            logger.warning(f"User {user_id} not found for privacy settings update")
+        return user
+    except Exception as e:
+        logger.error(
+            f"Failed to update privacy settings for user {user_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise

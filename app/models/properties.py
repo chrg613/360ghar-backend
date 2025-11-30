@@ -68,6 +68,8 @@ class Property(Base):
     features: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     main_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     virtual_tour_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_street_view_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    video_urls: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     floor_plan_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     video_tour_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)

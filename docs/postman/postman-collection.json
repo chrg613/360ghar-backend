@@ -604,7 +604,13 @@
                 {
                   "key": "q",
                   "value": "luxury apartment",
-                  "description": "Text search query",
+                  "description": "Text or semantic search query",
+                  "disabled": true
+                },
+                {
+                  "key": "semantic_search",
+                  "value": "false",
+                  "description": "Enable hybrid semantic search (requires q)",
                   "disabled": true
                 },
                 {
@@ -783,9 +789,63 @@
           },
           "response": []
         },
-        
-        
-        
+        {
+          "name": "Semantic Property Search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/properties/semantic-search?q=2%20bhk%20in%20Koramangala&semantic_search=true&sort_by=relevance",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "properties",
+                "semantic-search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "2 bhk in Koramangala with parking",
+                  "description": "Required search query used for embeddings"
+                },
+                {
+                  "key": "semantic_search",
+                  "value": "true",
+                  "description": "Enable hybrid vector similarity + text search"
+                },
+                {
+                  "key": "city",
+                  "value": "Bengaluru",
+                  "description": "Optional city filter",
+                  "disabled": true
+                },
+                {
+                  "key": "price_max",
+                  "value": "60000",
+                  "description": "Optional price ceiling",
+                  "disabled": true
+                },
+                {
+                  "key": "sort_by",
+                  "value": "relevance",
+                  "description": "Use relevance to combine vector and text scores"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
         
         
         {

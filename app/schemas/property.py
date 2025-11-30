@@ -46,6 +46,8 @@ class PropertyBase(BaseModel):
     bathrooms: Optional[int] = None
     balconies: Optional[int] = None
     parking_spaces: Optional[int] = None
+    video_urls: Optional[List[str]] = None
+    google_street_view_url: Optional[str] = None
 
 class PropertyCreate(PropertyBase):
     price_per_sqft: Optional[float] = None
@@ -93,6 +95,29 @@ class PropertyCreate(PropertyBase):
             return ValidationUtils.validate_pincode(v)
         return v
 
+    @field_validator("video_urls")
+    @classmethod
+    def validate_media_urls(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v:
+            ValidationUtils.validate_list_input(v, max_items=50)
+            cleaned = []
+            for url in v:
+                if not url:
+                    continue
+                url_str = str(url).strip()
+                if url_str:
+                    cleaned.append(url_str[:500])
+            return cleaned or None
+        return v
+
+    @field_validator("google_street_view_url")
+    @classmethod
+    def sanitize_street_view_url(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            sanitized = str(v).strip()
+            return sanitized[:500] if sanitized else None
+        return v
+
     @model_validator(mode="after")
     def validate_coordinates(self):
         if self.latitude is not None and self.longitude is not None:
@@ -109,6 +134,31 @@ class PropertyUpdate(BaseModel):
     amenity_ids: Optional[List[int]] = None
     features: Optional[List[str]] = None
     calendar_data: Optional[Dict[str, Any]] = None
+    video_urls: Optional[List[str]] = None
+    google_street_view_url: Optional[str] = None
+
+    @field_validator("video_urls")
+    @classmethod
+    def validate_media_urls(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v:
+            ValidationUtils.validate_list_input(v, max_items=50)
+            cleaned = []
+            for url in v:
+                if not url:
+                    continue
+                url_str = str(url).strip()
+                if url_str:
+                    cleaned.append(url_str[:500])
+            return cleaned or None
+        return v
+
+    @field_validator("google_street_view_url")
+    @classmethod
+    def sanitize_street_view_url(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            sanitized = str(v).strip()
+            return sanitized[:500] if sanitized else None
+        return v
 
 class PropertyInDB(PropertyBase):
     id: int
@@ -147,6 +197,8 @@ class Property(PropertyInDB):
     amenities: Optional[List[PropertyAmenityResponse]] = None
     distance_km: Optional[float] = None  # For location-based searches
     liked: Optional[bool] = None  # For swipe history - indicates if user liked this property
+    vector_distance: Optional[float] = None  # For semantic similarity scoring
+    relevance_score: Optional[float] = None  # Combined text + vector relevance score
     # Auth-aware context populated on detail view when user is logged in
     user_has_scheduled_visit: Optional[bool] = None
     user_scheduled_visit_count: Optional[int] = None
@@ -231,6 +283,7 @@ class UnifiedPropertyFilter(BaseModel):
     # Authentication-aware filters
     # When true and user is authenticated, excludes properties the user has already swiped
     exclude_swiped: bool = False
+    semantic_search: bool = False
 
 class UnifiedPropertyResponse(BaseModel):
     properties: List[Property]
