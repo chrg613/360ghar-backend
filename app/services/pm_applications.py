@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import desc, select
@@ -115,7 +115,7 @@ async def submit_public_application(
         answers=answers,
         application_data=application_data,
         emergency_contacts=emergency_contacts,
-        submitted_at=datetime.utcnow(),
+        submitted_at=datetime.now(timezone.utc),
     )
     db.add(application)
     await db.flush()
@@ -140,7 +140,7 @@ async def decide_application(
     await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=application.owner_id)
 
     application.status = decision
-    application.decision_at = datetime.utcnow()
+    application.decision_at = datetime.now(timezone.utc)
     application.decided_by_user_id = actor.id
     await db.flush()
     await db.refresh(application)

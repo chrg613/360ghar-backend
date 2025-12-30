@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -36,7 +36,7 @@ async def create_inspection_checklist(
         owner_id=owner_id,
         inspection_type=inspection_type,
         conducted_by_user_id=actor.id,
-        conducted_at=conducted_at or datetime.utcnow(),
+        conducted_at=conducted_at or datetime.now(timezone.utc),
         rooms_data=rooms_data,
         overall_notes=overall_notes,
     )
@@ -111,7 +111,7 @@ async def sign_inspection(
     if not lease:
         raise NotFoundException(detail="Lease not found")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Tenant can only attach tenant signature; owner can attach owner signature.
     if tenant_signature_document_id is not None:

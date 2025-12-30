@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -215,7 +215,7 @@ async def record_rent_payment(
         property_id=charge.property_id,
         owner_id=charge.owner_id,
         tenant_user_id=charge.tenant_user_id,
-        paid_at=paid_at or datetime.utcnow(),
+        paid_at=paid_at or datetime.now(timezone.utc),
         amount_paid=float(amount_paid),
         payment_method=payment_method,
         reference=reference,

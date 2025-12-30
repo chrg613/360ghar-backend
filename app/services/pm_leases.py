@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -143,7 +143,7 @@ async def upload_signed_lease(
     lease = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
 
     lease.lease_document_id = lease_document_id
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if signed_by_owner:
         lease.signed_by_owner_at = now
     if signed_by_tenant:
@@ -161,8 +161,19 @@ async def terminate_lease(
     lease_id: int,
 ) -> Lease:
     lease = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+
+    # Already terminated or expired - no-op
     if lease.status in {LeaseStatus.terminated, LeaseStatus.expired}:
         return lease
+
+    # Only active or expiring_soon leases can be terminated
+    # Draft leases should be deleted, not terminated
+    # Renewed leases are historical records
+    if lease.status not in {LeaseStatus.active, LeaseStatus.expiring_soon, LeaseStatus.pending_signature}:
+        raise BadRequestException(
+            detail=f"Cannot terminate a lease with status '{lease.status.value}'. "
+            f"Only active, expiring_soon, or pending_signature leases can be terminated."
+        )
 
     lease.status = LeaseStatus.terminated
     await db.flush()
