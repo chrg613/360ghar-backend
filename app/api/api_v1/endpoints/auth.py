@@ -206,7 +206,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
                 }
             })
         )
-        
+
         if data.user:
             supabase_user_data = {
                 "id": data.user.id,
@@ -214,9 +214,9 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
                 "email": data.user.email,
                 "user_metadata": data.user.user_metadata or {}
             }
-            
+
             db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
-            
+
             return {
                 "message": "User registered successfully",
                 "user": db_user,
