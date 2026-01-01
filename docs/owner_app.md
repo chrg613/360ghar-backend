@@ -1,6 +1,6 @@
 # Property Management Owner Mobile App — Backend Integration Specification
 
-This document provides the complete backend integration specification for building a **Property Management Mobile App for Owners**. It defines all screens, user flows, APIs, and implementation details required for the mobile team.
+This document is part of the **Property Management** module of 360 Ghar. It provides the complete backend integration specification for building a **Property Management Mobile App for Owners**. It defines all screens, user flows, APIs, and implementation details required for the mobile team.
 
 ---
 

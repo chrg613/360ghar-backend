@@ -4,6 +4,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.cache import CacheKeyPatterns, cached, invalidate_cache
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_admin
 from app.models.enums import UserRole
 from app.schemas.user import User as UserSchema
@@ -23,6 +25,40 @@ router = APIRouter()
 # Dependency to get core service
 def get_core_service(db: AsyncSession = Depends(get_db)) -> CoreService:
     return CoreService(db)
+
+
+# Cached helper functions for public endpoints
+@cached("faqs:public", ttl=settings.CACHE_TTL_FAQS)
+async def get_faqs_public_cached(
+    core_service: CoreService,
+    category: Optional[str],
+    limit: int,
+    offset: int
+):
+    """Cached version of public FAQs listing."""
+    return await core_service.get_faqs(
+        category=category,
+        is_active=True,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@cached("versions:check", ttl=3600)  # 1 hour TTL
+async def check_for_updates_cached(
+    core_service: CoreService,
+    app: str,
+    platform: str,
+    current_version: str
+):
+    """Cached version of app version check."""
+    from app.schemas.core import AppVersionCheckRequest
+    check_data = AppVersionCheckRequest(
+        app=app,
+        platform=platform,
+        current_version=current_version
+    )
+    return await core_service.check_for_updates(check_data)
 
 # ============================================================================
 # BUG REPORT ENDPOINTS
@@ -246,12 +282,13 @@ async def delete_page(
 # ============================================================================
 
 @router.post("/versions/", response_model=AppVersionResponse)
+@invalidate_cache([CacheKeyPatterns.VERSIONS])
 async def create_app_version(
     version_data: AppVersionCreate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Create a new app version entry (admin only)"""
+    """Create a new app version entry (admin only). Invalidates version cache."""
     return await core_service.create_app_version(version_data)
 
 @router.post("/versions/check", response_model=AppVersionCheckResponse)
@@ -259,8 +296,13 @@ async def check_for_updates(
     check_data: AppVersionCheckRequest,
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Check if there's an available update (public endpoint)"""
-    return await core_service.check_for_updates(check_data)
+    """Check if there's an available update (public endpoint, cached 1hr)."""
+    return await check_for_updates_cached(
+        core_service,
+        check_data.app,
+        check_data.platform,
+        check_data.current_version
+    )
 
 @router.get("/versions/", response_model=List[AppVersionResponse])
 async def get_app_versions(
@@ -282,13 +324,14 @@ async def get_app_versions(
     )
 
 @router.put("/versions/{version_id}", response_model=AppVersionResponse)
+@invalidate_cache([CacheKeyPatterns.VERSIONS])
 async def update_app_version(
     version_id: int,
     update_data: AppVersionUpdate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Update an app version entry (admin only)"""
+    """Update an app version entry (admin only). Invalidates version cache."""
     return await core_service.update_app_version(version_id, update_data)
 
 # ============================================================================
@@ -296,12 +339,13 @@ async def update_app_version(
 # ============================================================================
 
 @router.post("/faqs/", response_model=FAQResponse)
+@invalidate_cache([CacheKeyPatterns.FAQS])
 async def create_faq(
     faq_data: FAQCreate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Create a new FAQ (admin only)"""
+    """Create a new FAQ (admin only). Invalidates FAQ cache."""
     return await core_service.create_faq(faq_data)
 
 @router.get("/faqs/", response_model=List[FAQResponse])
@@ -328,13 +372,8 @@ async def get_faqs_public(
     offset: int = Query(0, ge=0, description="Pagination offset"),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Public FAQs listing (only active FAQs)"""
-    return await core_service.get_faqs(
-        category=category,
-        is_active=True,
-        limit=limit,
-        offset=offset,
-    )
+    """Public FAQs listing (only active FAQs, cached 6hrs)."""
+    return await get_faqs_public_cached(core_service, category, limit, offset)
 
 @router.get("/faqs/{faq_id}", response_model=FAQResponse)
 async def get_faq(
@@ -346,22 +385,24 @@ async def get_faq(
     return await core_service.get_faq_by_id(faq_id)
 
 @router.put("/faqs/{faq_id}", response_model=FAQResponse)
+@invalidate_cache([CacheKeyPatterns.FAQS])
 async def update_faq(
     faq_id: int,
     update_data: FAQUpdate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Update an FAQ (admin only)"""
+    """Update an FAQ (admin only). Invalidates FAQ cache."""
     return await core_service.update_faq(faq_id, update_data)
 
 @router.delete("/faqs/{faq_id}", response_model=MessageResponse)
+@invalidate_cache([CacheKeyPatterns.FAQS])
 async def delete_faq(
     faq_id: int,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Soft delete an FAQ (admin only)"""
+    """Soft delete an FAQ (admin only). Invalidates FAQ cache."""
     success = await core_service.delete_faq(faq_id)
     if not success:
         raise HTTPException(status_code=404, detail="FAQ not found")

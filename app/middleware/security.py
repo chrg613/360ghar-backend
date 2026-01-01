@@ -8,7 +8,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from app.core.config import settings
-from app.core.cache import cache_manager
+from app.core.cache import get_cache_manager
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -88,19 +88,21 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     
     async def validate_api_key(self, api_key: str) -> bool:
         """Validate API key against stored keys"""
+        cache = get_cache_manager()
+
         # Check cache first
         cache_key = f"api_key:{api_key[:10]}"
-        cached = await cache_manager.get(cache_key)
+        cached = await cache.get(cache_key)
         if cached is not None:
             return cached
-        
+
         # In production, check against database
         # For now, check against environment variable
         valid = api_key in settings.VALID_API_KEYS.split(",")
-        
+
         # Cache result
-        await cache_manager.set(cache_key, valid, ttl=300)
-        
+        await cache.set(cache_key, valid, ttl=300)
+
         return valid
 
 class RequestSignatureValidator:

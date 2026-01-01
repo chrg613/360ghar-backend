@@ -5,7 +5,7 @@ from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 import hashlib
-from app.core.cache import cache_manager
+from app.core.cache import get_cache_manager
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -92,34 +92,36 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     async def check_rate_limit(self, client_id: str, path: str) -> bool:
         """Check if request is within rate limit"""
+        cache = get_cache_manager()
+
         # If cache not available, use in-memory fallback
-        if not cache_manager.redis_client:
+        if not cache.is_available():
             return await self._check_rate_limit_memory(client_id, path)
-        
+
         # Create cache key
         key = f"rate_limit:{self.scope}:{client_id}:{path}"
-        
+
         # Get current timestamp
         now = int(time.time())
         window_start = now - self.period
-        
+
         # Get request history from cache
-        history = await cache_manager.get(key) or []
-        
+        history = await cache.get(key) or []
+
         # Filter requests within current window
         history = [ts for ts in history if ts > window_start]
-        
+
         # Check if limit exceeded
         if len(history) >= self.calls:
             logger.warning(f"Rate limit exceeded for {client_id} on {path}")
             return False
-        
+
         # Add current request
         history.append(now)
-        
+
         # Update cache
-        await cache_manager.set(key, history, ttl=self.period)
-        
+        await cache.set(key, history, ttl=self.period)
+
         return True
     
     _memory_store: Dict[str, list] = {}
@@ -183,12 +185,13 @@ class EndpointRateLimiter:
     
     async def check_rate_limit(self, client_id: str, endpoint: str) -> bool:
         """Check rate limit for specific endpoint"""
+        cache = get_cache_manager()
         key = f"endpoint_limit:{endpoint}:{client_id}"
-        
-        count = await cache_manager.get(key) or 0
-        
+
+        count = await cache.get(key) or 0
+
         if count >= self.calls:
             return False
-        
-        await cache_manager.set(key, count + 1, ttl=self.period)
+
+        await cache.set(key, count + 1, ttl=self.period)
         return True

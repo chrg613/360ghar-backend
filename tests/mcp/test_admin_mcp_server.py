@@ -1,0 +1,273 @@
+"""
+Tests for Admin MCP server.
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+
+class AsyncIteratorMock:
+    """Helper for async iteration in tests."""
+    def __init__(self, items):
+        self.items = items
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index < len(self.items):
+            item = self.items[self.index]
+            self.index += 1
+            return item
+        raise StopAsyncIteration
+
+
+class TestAgentPropertyTools:
+    """Tests for agent.properties.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_properties_list_authenticated(self, mock_mcp_context):
+        """Test listing agent's portfolio properties."""
+        from app.mcp.admin_server import agent_properties_list
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_properties_list(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_agent_properties_list_unauthorized(self):
+        """Test listing properties without agent role."""
+        from app.mcp.admin_server import agent_properties_list
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")  # Not an agent
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_properties_list(jwt="test_token")
+
+                # Should return unauthorized or forbidden
+                assert "error" in result
+
+
+class TestAgentLeaseTools:
+    """Tests for agent.leases.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_leases_list(self, mock_mcp_context):
+        """Test listing leases in agent's portfolio."""
+        from app.mcp.admin_server import agent_leases_list
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_leases_list(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_agent_leases_create(self, mock_mcp_context):
+        """Test creating lease as agent."""
+        from app.mcp.admin_server import agent_leases_create
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_leases_create(
+                    jwt="test_token",
+                    property_id=1,
+                    owner_id=1,
+                    tenant_name="Test Tenant",
+                    tenant_phone="+919876543210",
+                    start_date="2025-01-01",
+                    end_date="2026-01-01",
+                    monthly_rent=50000,
+                    security_deposit=100000,
+                )
+
+                assert isinstance(result, dict)
+
+
+class TestAgentRentTools:
+    """Tests for agent.rent.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_rent_list_due(self, mock_mcp_context):
+        """Test listing overdue rent."""
+        from app.mcp.admin_server import agent_rent_list_due
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_rent_list_due(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_agent_rent_record_payment(self, mock_mcp_context):
+        """Test recording rent payment as agent."""
+        from app.mcp.admin_server import agent_rent_record_payment
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_rent_record_payment(
+                    jwt="test_token",
+                    charge_id=1,
+                    amount_paid=50000,
+                    payment_method="bank_transfer",
+                    payment_date="2025-01-15",
+                )
+
+                assert isinstance(result, dict)
+
+
+class TestAgentMaintenanceTools:
+    """Tests for agent.maintenance.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_maintenance_list(self, mock_mcp_context):
+        """Test listing maintenance requests."""
+        from app.mcp.admin_server import agent_maintenance_list
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_maintenance_list(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_agent_maintenance_update_status(self, mock_mcp_context):
+        """Test updating maintenance request status."""
+        from app.mcp.admin_server import agent_maintenance_update_status
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_maintenance_update_status(
+                    jwt="test_token",
+                    request_id=1,
+                    status="in_progress",
+                )
+
+                assert isinstance(result, dict)
+
+
+class TestAgentDashboardTools:
+    """Tests for agent.dashboard.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_dashboard_overview(self, mock_mcp_context):
+        """Test getting dashboard overview."""
+        from app.mcp.admin_server import agent_dashboard_overview
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_dashboard_overview(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+
+class TestAdminTools:
+    """Tests for admin.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_admin_system_status(self, mock_mcp_context):
+        """Test getting system status as admin."""
+        from app.mcp.admin_server import admin_system_status
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="admin")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await admin_system_status(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_admin_system_status_non_admin(self):
+        """Test system status access denied for non-admin."""
+        from app.mcp.admin_server import admin_system_status
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await admin_system_status(jwt="test_token")
+
+                # Should be denied
+                assert "error" in result
+
+
+class TestAgentBookingTools:
+    """Tests for agent.bookings.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_agent_bookings_list_all(self, mock_mcp_context):
+        """Test listing all bookings as agent."""
+        from app.mcp.admin_server import agent_bookings_list_all
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_bookings_list_all(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_agent_bookings_update_status(self, mock_mcp_context):
+        """Test updating booking status as agent."""
+        from app.mcp.admin_server import agent_bookings_update_status
+
+        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="agent")
+
+            with patch("app.mcp.admin_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await agent_bookings_update_status(
+                    jwt="test_token",
+                    booking_id=1,
+                    status="confirmed",
+                )
+
+                assert isinstance(result, dict)

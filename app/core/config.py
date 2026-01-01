@@ -61,6 +61,22 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+
+    # Cache configuration
+    CACHE_BACKEND: str = "memory"  # "memory" or "redis"
+    CACHE_DEFAULT_TTL: int = 300  # 5 minutes default
+    CACHE_MEMORY_MAX_SIZE: int = 1000  # Max entries for in-memory cache
+    CACHE_KEY_PREFIX: str = "ghar360:"  # Redis key prefix
+
+    # Endpoint-specific TTLs (in seconds)
+    CACHE_TTL_AMENITIES: int = 86400  # 24 hours
+    CACHE_TTL_PROPERTIES_LIST: int = 43200 # 12 hours
+    CACHE_TTL_PROPERTY_DETAIL: int = 86400  # 24 hours
+    CACHE_TTL_BLOG_POSTS: int = 86400  # 24 hours
+    CACHE_TTL_BLOG_CATEGORIES: int = 86400  # 24 hours
+    CACHE_TTL_BLOG_TAGS: int = 86400  # 24 hours
+    CACHE_TTL_FAQS: int = 86400  # 24 hours
+    CACHE_TTL_VERSIONS: int = 86400  # 24 hours
     
     # Additional Supabase settings
     SUPABASE_STORAGE_BUCKET: str = "property-images"

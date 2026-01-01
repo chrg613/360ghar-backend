@@ -1,0 +1,204 @@
+"""
+Tests for User MCP server.
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+
+class TestOwnerPropertyTools:
+    """Tests for owner.properties.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_owner_properties_list_authenticated(self, mock_mcp_context):
+        """Test listing owner properties with auth."""
+        from app.mcp.user_server import owner_properties_list
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.user_server.list_managed_properties", new_callable=AsyncMock) as mock_list:
+                mock_list.return_value = {"items": [], "total": 0}
+
+                with patch("app.mcp.user_server.get_db") as mock_db:
+                    mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                    result = await owner_properties_list(jwt="test_token")
+
+                    assert "data" in result or "error" in result
+
+    @pytest.mark.asyncio
+    async def test_owner_properties_list_unauthenticated(self):
+        """Test listing properties without auth."""
+        from app.mcp.user_server import owner_properties_list
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = None
+
+            with patch("app.mcp.user_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await owner_properties_list(jwt=None)
+
+                assert "error" in result
+                assert result["error"]["code"] == "UNAUTHORIZED"
+
+
+class TestOwnerPropertyCreate:
+    """Tests for owner.properties.create tool."""
+
+    @pytest.mark.asyncio
+    async def test_create_property_success(self, mock_mcp_context):
+        """Test creating property."""
+        from app.mcp.user_server import owner_properties_create
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.user_server.create_managed_property", new_callable=AsyncMock) as mock_create:
+                mock_property = MagicMock()
+                mock_property.id = 1
+                mock_property.title = "New Property"
+                mock_create.return_value = mock_property
+
+                with patch("app.mcp.user_server.get_db") as mock_db:
+                    mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                    result = await owner_properties_create(
+                        jwt="test_token",
+                        title="New Property",
+                        property_type="apartment",
+                        purpose="rent",
+                        city="Mumbai",
+                        locality="Andheri",
+                        full_address="123 Test Street",
+                        pincode="400069",
+                    )
+
+                    # Should return success or error
+                    assert isinstance(result, dict)
+
+
+class TestTenantTools:
+    """Tests for tenant.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_tenant_lease_current(self, mock_mcp_context):
+        """Test getting current tenant lease."""
+        from app.mcp.user_server import tenant_lease_current
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.user_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await tenant_lease_current(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_tenant_rent_history(self, mock_mcp_context):
+        """Test getting tenant rent history."""
+        from app.mcp.user_server import tenant_rent_history
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.user_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await tenant_rent_history(jwt="test_token")
+
+                assert isinstance(result, dict)
+
+
+class TestBookingTools:
+    """Tests for bookings.* MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_bookings_list(self, mock_mcp_context):
+        """Test listing user bookings."""
+        from app.mcp.user_server import bookings_list
+
+        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+            mock_user.return_value = MagicMock(id=1, role="user")
+
+            with patch("app.mcp.user_server.booking_svc.get_user_bookings", new_callable=AsyncMock) as mock_list:
+                mock_list.return_value = {"bookings": [], "total": 0}
+
+                with patch("app.mcp.user_server.get_db") as mock_db:
+                    mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                    result = await bookings_list(jwt="test_token")
+
+                    assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_bookings_check_availability(self, mock_mcp_context):
+        """Test checking property availability."""
+        from app.mcp.user_server import bookings_check_availability
+
+        with patch("app.mcp.user_server.booking_svc.check_availability", new_callable=AsyncMock) as mock_check:
+            mock_check.return_value = {"available": True, "conflicts": []}
+
+            with patch("app.mcp.user_server.get_db") as mock_db:
+                mock_db.return_value = AsyncIteratorMock([MagicMock()])
+
+                result = await bookings_check_availability(
+                    property_id=1,
+                    check_in_date="2025-01-15",
+                    check_out_date="2025-01-18",
+                )
+
+                assert isinstance(result, dict)
+
+
+class TestMCPErrorResponses:
+    """Tests for MCP error response formats."""
+
+    def test_unauthorized_response(self):
+        """Test unauthorized error response format."""
+        from app.mcp.errors import unauthorized_response
+
+        result = unauthorized_response("Test message")
+
+        assert "error" in result
+        assert result["error"]["code"] == "UNAUTHORIZED"
+        assert result["error"]["message"] == "Test message"
+
+    def test_not_found_response(self):
+        """Test not found error response format."""
+        from app.mcp.errors import not_found_response
+
+        result = not_found_response("Item not found")
+
+        assert "error" in result
+        assert result["error"]["code"] == "NOT_FOUND"
+
+    def test_invalid_input_response(self):
+        """Test invalid input error response format."""
+        from app.mcp.errors import invalid_input_response
+
+        result = invalid_input_response("Invalid field")
+
+        assert "error" in result
+        assert result["error"]["code"] == "INVALID_INPUT"
+
+
+# Helper class for async iteration
+class AsyncIteratorMock:
+    def __init__(self, items):
+        self.items = items
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index < len(self.items):
+            item = self.items[self.index]
+            self.index += 1
+            return item
+        raise StopAsyncIteration

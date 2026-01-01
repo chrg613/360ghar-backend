@@ -1,19 +1,26 @@
 """
 Application factory for creating FastAPI app instances.
+
+MCP Server Architecture:
+- /mcp        -> User MCP server (owners, tenants, regular users)
+- /mcp-admin  -> Admin MCP server (agents, administrators)
+
+All servers share the same OAuth authentication infrastructure (Supabase JWT).
 """
 import fastmcp
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.api_v1.api import api_router
-from app.core.cache import cache_manager
+from app.core.cache import initialize_cache, shutdown_cache
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import get_logger
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import RequestIDMiddleware, SecurityHeadersMiddleware
 from app.mcp.auth_provider import SupabaseAuthProvider, configure_fastmcp_auth
-from app.mcp.server import mcp
+from app.mcp.user_server import user_mcp
+from app.mcp.admin_server import admin_mcp
 
 logger = get_logger(__name__)
 
@@ -23,11 +30,23 @@ def create_app(testing: bool = False) -> FastAPI:
 
     # Configure FastMCP auth to use Supabase-backed JWT verification for HTTP.
     configure_fastmcp_auth()
-    mcp.auth = SupabaseAuthProvider()
 
-    # Create the MCP HTTP sub-application once so we can use its lifespan
-    # and mount it under /mcp on the main FastAPI app.
-    mcp_app = mcp.http_app(
+    # Configure auth for MCP servers
+    user_mcp.auth = SupabaseAuthProvider()
+    admin_mcp.auth = SupabaseAuthProvider()
+
+    # Create the MCP HTTP sub-applications
+    # User MCP (for owners, tenants, regular users)
+    user_mcp_app = user_mcp.http_app(
+        path="/",
+        transport="http",
+        json_response=False,
+        stateless_http=True,
+        middleware=None,
+    )
+
+    # Admin MCP (for agents and administrators)
+    admin_mcp_app = admin_mcp.http_app(
         path="/",
         transport="http",
         json_response=False,
@@ -38,56 +57,59 @@ def create_app(testing: bool = False) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Application lifespan manager for startup and shutdown events."""
-        async with mcp_app.lifespan(app):
-            try:
-                # Initialize cache manager (optional Redis connection)
-                if not testing:
-                    try:
-                        await cache_manager.connect()
-                    except Exception as cache_e:
-                        logger.warning(f"Cache connection skipped/failed: {cache_e}")
-
-                # Optional: start push notification scheduler
-                if not testing:
-                    try:
-                        from app.services.notification_scheduler import (
-                            start_notification_scheduler,
-                        )
-                        start_notification_scheduler(app)
-                    except Exception as sched_e:
-                        logger.error(f"Failed to start notification scheduler: {sched_e}")
-
-                # Optional: start vector sync scheduler
-                if not testing:
-                    try:
-                        from app.services.vector_sync_scheduler import (
-                            start_vector_sync_scheduler,
-                        )
-                        start_vector_sync_scheduler(app)
-                    except Exception as sched_vec_e:
-                        logger.error(f"Failed to start vector sync scheduler: {sched_vec_e}")
-            except Exception as e:
-                logger.error(f"Application startup failed: {e}")
-
-            logger.info(
-                "API started",
-                extra={
-                    "event": "startup",
-                    "env": settings.ENVIRONMENT,
-                    "version": "2.0.0",
-                },
-            )
-
-            yield
-
-            # Shutdown
-            if not testing:
+        # Initialize MCP app lifespans
+        async with user_mcp_app.lifespan(app):
+            async with admin_mcp_app.lifespan(app):
                 try:
-                    await cache_manager.disconnect()
-                except Exception as cache_e:
-                    logger.warning(f"Cache disconnect skipped/failed: {cache_e}")
-            await engine.dispose()
-            logger.info("API shutdown", extra={"event": "shutdown"})
+                    # Initialize cache manager
+                    if not testing:
+                        try:
+                            await initialize_cache()
+                        except Exception as cache_e:
+                            logger.warning(f"Cache connection skipped/failed: {cache_e}")
+
+                    # Optional: start push notification scheduler
+                    if not testing:
+                        try:
+                            from app.services.notification_scheduler import (
+                                start_notification_scheduler,
+                            )
+                            start_notification_scheduler(app)
+                        except Exception as sched_e:
+                            logger.error(f"Failed to start notification scheduler: {sched_e}")
+
+                    # Optional: start vector sync scheduler
+                    if not testing:
+                        try:
+                            from app.services.vector_sync_scheduler import (
+                                start_vector_sync_scheduler,
+                            )
+                            start_vector_sync_scheduler(app)
+                        except Exception as sched_vec_e:
+                            logger.error(f"Failed to start vector sync scheduler: {sched_vec_e}")
+                except Exception as e:
+                    logger.error(f"Application startup failed: {e}")
+
+                logger.info(
+                    "API started",
+                    extra={
+                        "event": "startup",
+                        "env": settings.ENVIRONMENT,
+                        "version": "2.0.0",
+                        "mcp_servers": ["/mcp", "/mcp-admin"],
+                    },
+                )
+
+                yield
+
+                # Shutdown
+                if not testing:
+                    try:
+                        await shutdown_cache()
+                    except Exception as cache_e:
+                        logger.warning(f"Cache disconnect skipped/failed: {cache_e}")
+                await engine.dispose()
+                logger.info("API shutdown", extra={"event": "shutdown"})
 
     app = FastAPI(
         lifespan=lifespan,
@@ -172,7 +194,11 @@ def create_app(testing: bool = False) -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_V1_STR)
 
-    # Mount MCP HTTP app at /mcp using FastMCP's HTTP transport.
-    app.mount("/mcp", mcp_app)
+    # Mount MCP servers using FastMCP's HTTP transport
+    # User MCP server (for owners, tenants, regular users)
+    app.mount("/mcp", user_mcp_app)
+
+    # Admin MCP server (for agents and administrators)
+    app.mount("/mcp-admin", admin_mcp_app)
 
     return app

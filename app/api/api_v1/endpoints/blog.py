@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.cache import cached, invalidate_cache, CacheKeyPatterns
 from app.core.logging import get_logger
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
 from app.models.enums import UserRole
@@ -21,6 +23,19 @@ from app.services.blog_service.generator import generate_draft_from_topic, gener
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+# Cached helper functions for reference data
+@cached("blog:categories", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
+async def get_categories_cached(db: AsyncSession, page: int, limit: int):
+    """Cached version of list_categories."""
+    return await list_categories(db, page, limit)
+
+
+@cached("blog:tags", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
+async def get_tags_cached(db: AsyncSession, page: int, limit: int):
+    """Cached version of list_tags."""
+    return await list_tags(db, page, limit)
 
 
 @router.post("/posts", response_model=BlogPost)
@@ -163,12 +178,13 @@ async def generate_bulk(
 
 # Category Management Endpoints
 @router.post("/categories", response_model=BlogCategory, status_code=201)
+@invalidate_cache([CacheKeyPatterns.BLOG_CATEGORIES])
 async def create_category_endpoint(
     payload: BlogCategoryCreate,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Create a new blog category (admin only)."""
+    """Create a new blog category (admin only). Invalidates category cache."""
     try:
         return await create_category(db, payload.name, payload.description)
     except HTTPException:
@@ -185,9 +201,9 @@ async def list_categories_endpoint(
     db: AsyncSession = Depends(get_db),
     _current_user: Optional[UserSchema] = Depends(get_current_user_optional),
 ):
-    """List all blog categories with pagination. Public endpoint."""
+    """List all blog categories with pagination. Public endpoint (cached 6hrs)."""
     try:
-        categories, total = await list_categories(db, page, limit)
+        categories, total = await get_categories_cached(db, page, limit)
         total_pages = (total + limit - 1) // limit
         return {
             "items": categories,
@@ -217,13 +233,14 @@ async def get_category_endpoint(
 
 
 @router.put("/categories/{identifier}", response_model=BlogCategory)
+@invalidate_cache([CacheKeyPatterns.BLOG_CATEGORIES])
 async def update_category_endpoint(
     identifier: str,
     payload: BlogCategoryUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Update a category by ID or slug (admin only)."""
+    """Update a category by ID or slug (admin only). Invalidates category cache."""
     try:
         return await update_category(db, identifier, payload.name, payload.description)
     except HTTPException:
@@ -234,12 +251,13 @@ async def update_category_endpoint(
 
 
 @router.delete("/categories/{identifier}")
+@invalidate_cache([CacheKeyPatterns.BLOG_CATEGORIES])
 async def delete_category_endpoint(
     identifier: str,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Delete a category by ID or slug (admin only)."""
+    """Delete a category by ID or slug (admin only). Invalidates category cache."""
     try:
         success = await delete_category(db, identifier)
         return {"message": "Category deleted successfully"}
@@ -252,12 +270,13 @@ async def delete_category_endpoint(
 
 # Tag Management Endpoints
 @router.post("/tags", response_model=BlogTag, status_code=201)
+@invalidate_cache([CacheKeyPatterns.BLOG_TAGS])
 async def create_tag_endpoint(
     payload: BlogTagCreate,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Create a new blog tag (admin only)."""
+    """Create a new blog tag (admin only). Invalidates tag cache."""
     try:
         return await create_tag(db, payload.name)
     except HTTPException:
@@ -274,9 +293,9 @@ async def list_tags_endpoint(
     db: AsyncSession = Depends(get_db),
     _current_user: Optional[UserSchema] = Depends(get_current_user_optional),
 ):
-    """List all blog tags with pagination. Public endpoint."""
+    """List all blog tags with pagination. Public endpoint (cached 6hrs)."""
     try:
-        tags, total = await list_tags(db, page, limit)
+        tags, total = await get_tags_cached(db, page, limit)
         total_pages = (total + limit - 1) // limit
         return {
             "items": tags,
@@ -306,13 +325,14 @@ async def get_tag_endpoint(
 
 
 @router.put("/tags/{identifier}", response_model=BlogTag)
+@invalidate_cache([CacheKeyPatterns.BLOG_TAGS])
 async def update_tag_endpoint(
     identifier: str,
     payload: BlogTagUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Update a tag by ID or slug (admin only)."""
+    """Update a tag by ID or slug (admin only). Invalidates tag cache."""
     try:
         return await update_tag(db, identifier, payload.name)
     except HTTPException:
@@ -323,12 +343,13 @@ async def update_tag_endpoint(
 
 
 @router.delete("/tags/{identifier}")
+@invalidate_cache([CacheKeyPatterns.BLOG_TAGS])
 async def delete_tag_endpoint(
     identifier: str,
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
-    """Delete a tag by ID or slug (admin only)."""
+    """Delete a tag by ID or slug (admin only). Invalidates tag cache."""
     try:
         success = await delete_tag(db, identifier)
         return {"message": "Tag deleted successfully"}

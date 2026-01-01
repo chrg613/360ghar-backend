@@ -1,11 +1,15 @@
-# 360Ghar Real Estate Platform Backend
+# 360 Ghar Backend
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Framework](https://img.shields.io/badge/framework-FastAPI-green.svg)](https://fastapi.tiangolo.com/)
 [![Database](https://img.shields.io/badge/database-PostgreSQL%20+%20PostGIS-blue.svg)](https://www.postgresql.org/)
 
-A high-performance, modern backend for a Tinder-like real estate platform. Built with FastAPI and PostgreSQL, this API powers features like swipe-based property discovery, advanced geospatial search, agent-managed property visits, and short-stay bookings.
+A high-performance, modern backend powering 360 Ghar's unified real estate platform. Built with FastAPI and PostgreSQL, this API serves three integrated modules:
+
+- **360 Ghar Core**: Real estate marketplace for buying and renting properties with swipe-based discovery, property visits, and agent coordination
+- **360 Stays**: Short-stay booking platform for hotels, vacation rentals, and temporary accommodations
+- **Property Management**: Comprehensive property management system for landlords and property managers (leases, rent collection, maintenance, reporting)
 
 ## Table of Contents
 
@@ -25,17 +29,34 @@ A high-performance, modern backend for a Tinder-like real estate platform. Built
 
 ## About The Project
 
-360Ghar revolutionizes property discovery through an engaging, swipe-based interface similar to dating apps, combined with powerful map-based search and professional agent assistance. The platform supports both traditional property search and short-stay bookings, making it a comprehensive real estate solution.
+360 Ghar is a unified real estate platform serving the complete property lifecycle:
+
+- **360 Ghar Core** revolutionizes property discovery through an engaging, swipe-based interface combined with powerful map-based search and professional agent assistance for buying and renting properties.
+- **360 Stays** provides a complete short-stay booking system with availability checks, dynamic pricing, and guest management for hotels and vacation rentals.
+- **Property Management** empowers landlords and property managers with tools for tenant management, lease tracking, rent collection, maintenance handling, and financial reporting.
+
+All three modules share a common backend infrastructure, user authentication, and property database.
 
 ## Key Features
 
-### Core Functionality
+### 360 Ghar Core (Real Estate Marketplace)
 - **Tinder-like Property Swiping**: Intuitive swipe interface to like or pass on properties
 - **Advanced Property Search**: Unified endpoint supporting geospatial, full-text, and filtered search
 - **Property Visit Scheduling**: Agent-managed visit coordination with automatic assignment
-- **Short-stay Bookings**: Complete booking system with availability checks and pricing
 - **Agent Management**: Comprehensive agent system with load balancing and performance tracking
 - **User Personalization**: Preference learning from user interactions and search history
+
+### 360 Stays (Short-Stay Bookings)
+- **Short-stay Bookings**: Complete booking system with availability checks and pricing
+- **Dynamic Pricing**: Configurable daily rates and minimum stay requirements
+- **Guest Management**: Booking lifecycle from reservation to checkout
+
+### Property Management
+- **Tenant & Lease Management**: Track tenants, leases, and rental applications
+- **Rent Collection**: Manual-first rent ledger with charge generation and payment tracking
+- **Maintenance Requests**: Work order management for property upkeep
+- **Document Vault**: Secure storage for leases, receipts, and property documents
+- **Financial Reporting**: Rent roll, income statements, P&L, and occupancy reports
 
 ### Technical Highlights
 - **Modern & Fast**: Built with **FastAPI** for high performance and automatic API documentation
@@ -132,6 +153,19 @@ All endpoints are prefixed with `/api/v1`.
 - `GET /available/`: List available agents
 - `GET /{agent_id}/`: Get agent details
 - `GET /{agent_id}/stats/`: Get agent performance statistics
+
+### 🏢 Property Management (`/pm`)
+- `/pm/dashboard`: Portfolio overview and metrics
+- `/pm/properties`: Managed properties CRUD
+- `/pm/tenants`: Tenant directory
+- `/pm/applications`: Rental applications and forms
+- `/pm/leases`: Lease management
+- `/pm/rent`: Rent charges and payments
+- `/pm/expenses`: Expense tracking
+- `/pm/maintenance`: Maintenance requests
+- `/pm/documents`: Document vault
+- `/pm/inspections`: Property inspections
+- `/pm/reports`: Financial reports
 
 ## Getting Started
 
@@ -369,6 +403,6 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-**360Ghar Development Team** - [dev@360ghar.com](mailto:dev@360ghar.com)
+**360 Ghar Development Team** - [dev@360ghar.com](mailto:dev@360ghar.com)
 
 Project Link: [https://github.com/your-username/360ghar-backend](https://github.com/your-username/360ghar-backend)

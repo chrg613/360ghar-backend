@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+This repository contains the 360 Ghar unified real estate platform backend, serving three integrated modules: 360 Ghar Core (buy/rent marketplace), 360 Stays (short-stay bookings), and Property Management (landlord/manager tools).
+
 ## Build, Test, and Development Commands
 
 ### Setup

@@ -1,0 +1,99 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop, property-management]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup PostgreSQL extensions
+        env:
+          PGPASSWORD: test_password
+        run: |
+          psql -h localhost -U test_user -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          psql -h localhost -U test_user -d test_db -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+
+      - name: Run tests
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://test_user:test_password@localhost:5432/test_db
+          DATABASE_URL: postgresql+psycopg://test_user:test_password@localhost:5432/test_db
+          ASYNC_DATABASE_URL: postgresql+psycopg://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          SUPABASE_URL: https://mock.supabase.co
+          SUPABASE_KEY: mock_key_for_testing
+          SUPABASE_JWT_SECRET: mock_jwt_secret_for_testing_purposes_only_32chars
+          ENVIRONMENT: test
+          CI: "true"
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=90 -n auto
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linting tools
+        run: |
+          pip install ruff mypy
+
+      - name: Run ruff
+        run: ruff check app/ --output-format=github
+
+      - name: Run mypy
+        run: mypy app/ --ignore-missing-imports --no-error-summary || true

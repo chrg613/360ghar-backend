@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_validator
 
 from app.core.database import get_db
 from app.core.auth import get_supabase_auth_client, verify_supabase_token, admin_find_user_by_phone
-from app.core.cache import cache_manager
+from app.core.cache import get_cache_manager
 from app.core.logging import get_logger
 from app.schemas.user import UserCreate, UserLogin, User as UserSchema
 from app.services.user import get_or_create_user_from_supabase
@@ -54,8 +54,9 @@ async def _check_otp_rate_limit(phone: str, request: Request) -> None:
     window_start = now - OTP_RATE_LIMIT_PERIOD
 
     for key in [phone_key, ip_key]:
-        if cache_manager.redis_client:
-            history = await cache_manager.get(key) or []
+        cache = get_cache_manager()
+        if cache.is_available():
+            history = await cache.get(key) or []
             history = [ts for ts in history if ts > window_start]
 
             if len(history) >= OTP_RATE_LIMIT_CALLS:
@@ -73,7 +74,7 @@ async def _check_otp_rate_limit(phone: str, request: Request) -> None:
                 )
 
             history.append(now)
-            await cache_manager.set(key, history, ttl=OTP_RATE_LIMIT_PERIOD)
+            await cache.set(key, history, ttl=OTP_RATE_LIMIT_PERIOD)
 
 @router.post("/login/")
 async def login(user_login: UserLogin, db: AsyncSession = Depends(get_db)):

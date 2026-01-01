@@ -18,8 +18,6 @@ geoalchemy2==0.14.2
 aiosqlite
 faker==19.12.0
 bleach
-pytest
-pytest-asyncio
 sentry-sdk[fastapi]
 fastapi-debug-toolbar>=0.6.0
 psycopg[binary]
@@ -31,3 +29,17 @@ google-auth>=2.23.0
 APScheduler>=3.10.4
 google-generativeai>=0.7.0
 pgvector>=0.2.5
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.5.0
+pytest-timeout>=2.2.0
+factory-boy>=3.3.0
+respx>=0.21.0
+freezegun>=1.4.0
+
+# Linting
+ruff>=0.1.0
+mypy>=1.8.0
