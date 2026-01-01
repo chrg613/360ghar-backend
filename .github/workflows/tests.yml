@@ -25,6 +25,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Build test database image
         run: docker build -t test-postgres -f .github/Dockerfile.test-db .
 
@@ -38,22 +43,38 @@ jobs:
             -p 5432:5432 \
             test-postgres
 
-          # Wait for PostgreSQL to be ready
+          # Wait for PostgreSQL to accept connections FROM THE HOST
+          echo "Waiting for PostgreSQL to accept host connections..."
           for i in {1..30}; do
-            if docker exec test-postgres pg_isready -U test_user -d test_db; then
-              echo "PostgreSQL is ready"
-              break
+            if pg_isready -h localhost -p 5432 -U test_user; then
+              echo "PostgreSQL is ready and accepting host connections"
+              exit 0
             fi
             echo "Waiting for PostgreSQL... ($i/30)"
             sleep 2
           done
+          echo "ERROR: PostgreSQL failed to become ready"
+          docker logs test-postgres
+          exit 1
 
       - name: Setup PostgreSQL extensions
         env:
           PGPASSWORD: test_password
         run: |
-          psql -h localhost -U test_user -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
-          psql -h localhost -U test_user -d test_db -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+          # Create extensions with retry logic
+          for ext in vector postgis; do
+            for i in {1..5}; do
+              if psql -h localhost -U test_user -d test_db -c "CREATE EXTENSION IF NOT EXISTS $ext;"; then
+                echo "Extension $ext created successfully"
+                break
+              fi
+              echo "Retry $i/5 for extension $ext..."
+              sleep 2
+            done
+          done
+
+          # Verify extensions were created
+          psql -h localhost -U test_user -d test_db -c "SELECT extname FROM pg_extension WHERE extname IN ('vector', 'postgis');"
 
       - name: Set up Python
         uses: actions/setup-python@v5
