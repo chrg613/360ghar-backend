@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from app.core.database import AsyncSessionLocal
 from app.core.logging import get_logger
+from app.mcp.apps_sdk import AuthRequiredError, MCP_SECURITY_SCHEMES_MIXED, build_widget_tool_meta
 from app.mcp.chatgpt.response_formatter import (
     format_chatgpt_response,
     format_auth_required_response,
@@ -28,10 +29,23 @@ from app.mcp.user_server import user_mcp
 
 logger = get_logger(__name__)
 
+# ChatGPT tool metadata for widget linkage
+VISIT_SCHEDULER_META = build_widget_tool_meta(
+    widget_uri="ui://widget/visitschedulerwidget.html",
+    invoking="Scheduling your visit...",
+    invoked="Visit scheduled",
+)
 
-async def _get_optional_user(db, jwt: Optional[str] = None):
+VISIT_LIST_META = build_widget_tool_meta(
+    widget_uri="ui://widget/visitlistwidget.html",
+    invoking="Loading your visits...",
+    invoked="Visits loaded",
+)
+
+
+async def _get_optional_user(db):
     """Get user if authenticated, None for guests."""
-    return await get_user_from_mcp_context(db, jwt, None)
+    return await get_user_from_mcp_context(db)
 
 
 def _serialize_visit(visit) -> Dict[str, Any]:
@@ -62,11 +76,18 @@ def _serialize_visit(visit) -> Dict[str, Any]:
 # ============================================================================
 
 
-@user_mcp.tool("visits.schedule")
+@user_mcp.tool(
+    "visits_schedule",
+    annotations={
+        "title": "Schedule Property Visit",
+        "readOnlyHint": False,
+        "securitySchemes": MCP_SECURITY_SCHEMES_MIXED,
+    },
+    meta=VISIT_SCHEDULER_META,
+)
 async def visits_schedule(
     property_id: int,
     scheduled_date: str,
-    jwt: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Schedule a property visit.
@@ -88,7 +109,7 @@ async def visits_schedule(
         from app.services.property import get_property
 
         async with AsyncSessionLocal() as db:
-            user = await _get_optional_user(db, jwt)
+            user = await _get_optional_user(db)
 
             if not user:
                 return format_auth_required_response(
@@ -141,6 +162,8 @@ async def visits_schedule(
                 content_summary=format_visit_summary(visit_dict),
             )
 
+    except AuthRequiredError:
+        raise
     except Exception as e:
         logger.error(f"Error in visits.schedule: {e}", exc_info=True)
         return format_chatgpt_response(
@@ -149,9 +172,16 @@ async def visits_schedule(
         )
 
 
-@user_mcp.tool("visits.list")
+@user_mcp.tool(
+    "visits_list",
+    annotations={
+        "title": "List My Visits",
+        "readOnlyHint": True,
+        "securitySchemes": MCP_SECURITY_SCHEMES_MIXED,
+    },
+    meta=VISIT_LIST_META,
+)
 async def visits_list(
-    jwt: Optional[str] = None,
     status: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
@@ -177,7 +207,7 @@ async def visits_list(
         page = max(1, page)
 
         async with AsyncSessionLocal() as db:
-            user = await _get_optional_user(db, jwt)
+            user = await _get_optional_user(db)
 
             if not user:
                 return format_auth_required_response(
@@ -221,6 +251,8 @@ async def visits_list(
                 content_summary=format_visits_list_summary(visits, counts),
             )
 
+    except AuthRequiredError:
+        raise
     except Exception as e:
         logger.error(f"Error in visits.list: {e}", exc_info=True)
         return format_chatgpt_response(
@@ -229,10 +261,17 @@ async def visits_list(
         )
 
 
-@user_mcp.tool("visits.get")
+@user_mcp.tool(
+    "visits_get",
+    annotations={
+        "title": "Get Visit Details",
+        "readOnlyHint": True,
+        "securitySchemes": MCP_SECURITY_SCHEMES_MIXED,
+    },
+    meta=VISIT_LIST_META,
+)
 async def visits_get(
     visit_id: int,
-    jwt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Get details of a specific visit.
 
@@ -250,7 +289,7 @@ async def visits_get(
         from app.services.visit import get_visit
 
         async with AsyncSessionLocal() as db:
-            user = await _get_optional_user(db, jwt)
+            user = await _get_optional_user(db)
 
             if not user:
                 return format_auth_required_response(
@@ -281,6 +320,8 @@ async def visits_get(
                 content_summary=format_visit_summary(visit_dict),
             )
 
+    except AuthRequiredError:
+        raise
     except Exception as e:
         logger.error(f"Error in visits.get: {e}", exc_info=True)
         return format_chatgpt_response(
@@ -289,10 +330,21 @@ async def visits_get(
         )
 
 
-@user_mcp.tool("visits.cancel")
+@user_mcp.tool(
+    "visits_cancel",
+    annotations={
+        "title": "Cancel Visit",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "securitySchemes": MCP_SECURITY_SCHEMES_MIXED,
+    },
+    meta={
+        "openai/toolInvocation/invoking": "Cancelling visit...",
+        "openai/toolInvocation/invoked": "Visit cancelled",
+    },
+)
 async def visits_cancel(
     visit_id: int,
-    jwt: Optional[str] = None,
     reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Cancel a scheduled property visit.
@@ -312,7 +364,7 @@ async def visits_cancel(
         from app.services.visit import get_visit, cancel_visit
 
         async with AsyncSessionLocal() as db:
-            user = await _get_optional_user(db, jwt)
+            user = await _get_optional_user(db)
 
             if not user:
                 return format_auth_required_response(
@@ -353,6 +405,8 @@ async def visits_cancel(
                 content_summary=f"Your visit has been cancelled.{' Reason: ' + reason if reason else ''}",
             )
 
+    except AuthRequiredError:
+        raise
     except Exception as e:
         logger.error(f"Error in visits.cancel: {e}", exc_info=True)
         return format_chatgpt_response(

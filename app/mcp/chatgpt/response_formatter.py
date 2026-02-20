@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 
+from app.mcp.apps_sdk import AppsSDKToolResult
+
 
 def format_chatgpt_response(
     data: Dict[str, Any],
     content_summary: str,
     meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    *,
+    is_error: bool = False,
+) -> AppsSDKToolResult:
     """Format tool response for ChatGPT App consumption.
 
     Args:
@@ -26,23 +30,25 @@ def format_chatgpt_response(
               map coordinates, or sensitive info not needed by the model.
 
     Returns:
-        Formatted response dict with structuredContent, content, and optionally _meta.
+        ToolResult with structuredContent, content, and optional result-level _meta.
     """
-    response = {
-        "structuredContent": data,
-        "content": content_summary,
-    }
-    if meta:
-        response["_meta"] = meta
-    return response
+    return AppsSDKToolResult(
+        content=content_summary,
+        structured_content=data,
+        result_meta=meta,
+        is_error=is_error,
+    )
 
 
 def format_auth_required_response(
     action: str,
     message: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> None:
     """Format a response that prompts the user to authenticate.
+
+    Raises an AuthRequiredError which will be turned into a CallToolResult with
+    `_meta["mcp/www_authenticate"]` to trigger the OAuth flow in ChatGPT's UI.
 
     Args:
         action: The action that requires authentication (e.g., "swipe", "schedule_visit")
@@ -50,8 +56,10 @@ def format_auth_required_response(
         context: Optional context data to include (e.g., property_id being acted on)
 
     Returns:
-        Formatted response prompting for authentication.
+        None (always raises).
     """
+    from app.mcp.apps_sdk import AuthRequiredError
+
     if message is None:
         message = (
             "To use this feature, please log in to your 360Ghar account. "
@@ -61,14 +69,14 @@ def format_auth_required_response(
     data = {
         "requires_auth": True,
         "action": action,
-        "login_url": "/mcp/oauth/authorize",
     }
     if context:
         data.update(context)
 
-    return format_chatgpt_response(
-        data=data,
-        content_summary=message,
+    raise AuthRequiredError(
+        message=message,
+        www_authenticate='Bearer error="invalid_token"',
+        structured_content=data,
     )
 
 

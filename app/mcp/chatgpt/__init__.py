@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any
 from fastmcp import FastMCP
 
 from app.core.logging import get_logger
+from app.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -31,58 +32,58 @@ WIDGET_DIR = Path(__file__).parent.parent.parent.parent / "chatgpt-widgets" / "d
 # Widget to tool mapping with metadata
 WIDGETS: Dict[str, Dict[str, Any]] = {
     "PropertySearchWidget": {
-        "tools": ["discovery.search"],
+        "tools": ["discovery_search"],
         "title": "Property Search Results",
         "description": "Grid view of property search results with filtering",
     },
     "PropertyDetailsWidget": {
-        "tools": ["discovery.property.get"],
+        "tools": ["discovery_property_get"],
         "title": "Property Details",
         "description": "Full property details with images and amenities",
     },
     "PropertySwipeWidget": {
-        "tools": ["discovery.feed"],
+        "tools": ["discovery_feed"],
         "title": "Property Discovery",
         "description": "Swipe-based property discovery interface",
     },
     "VisitSchedulerWidget": {
-        "tools": ["visits.schedule"],
+        "tools": ["visits_schedule"],
         "title": "Schedule Visit",
         "description": "Schedule a property visit with date/time selection",
     },
     "VisitListWidget": {
-        "tools": ["visits.list"],
+        "tools": ["visits_list"],
         "title": "My Visits",
         "description": "List of scheduled property visits",
     },
     "LeaseDetailsWidget": {
-        "tools": ["tenant.lease.current"],
+        "tools": ["tenant_lease_current"],
         "title": "Lease Details",
         "description": "Current lease information for tenants",
     },
     "MaintenanceWidget": {
-        "tools": ["tenant.maintenance.list", "tenant.maintenance.create"],
+        "tools": ["tenant_maintenance_list", "tenant_maintenance_create"],
         "title": "Maintenance Requests",
         "description": "Submit and track maintenance requests",
     },
     "OwnerDashboardWidget": {
-        "tools": ["owner.properties.list", "owner.dashboard.overview"],
+        "tools": ["owner_properties_list", "owner_dashboard_overview"],
         "title": "Owner Dashboard",
         "description": "Property owner dashboard with stats and listings",
     },
     # Property Management Widgets
     "LeaseManagementWidget": {
-        "tools": ["owner.leases.list", "owner.leases.get"],
+        "tools": ["owner_leases_list", "owner_leases_get"],
         "title": "Lease Management",
         "description": "View and manage property leases",
     },
     "RentCollectionWidget": {
-        "tools": ["owner.rent.status", "owner.rent.record_payment", "owner.rent.history"],
+        "tools": ["owner_rent_status", "owner_rent_record_payment", "owner_rent_history"],
         "title": "Rent Collection",
         "description": "Track rent payments and record transactions",
     },
     "TenantRentWidget": {
-        "tools": ["tenant.rent.dues", "tenant.rent.history"],
+        "tools": ["tenant_rent_dues", "tenant_rent_history"],
         "title": "My Rent",
         "description": "View rent dues and payment history",
     },
@@ -108,44 +109,69 @@ def get_widget_for_tool(tool_name: str) -> Optional[str]:
 def register_chatgpt_widgets(mcp: FastMCP) -> None:
     """Register ChatGPT widget HTML bundles as MCP resources.
 
-    Widgets are registered with mimeType 'text/html+skybridge' which
-    ChatGPT uses to render them in iframes.
+    Widgets are registered with standard HTML mimeType for broader MCP host
+    compatibility, while retaining OpenAI-specific metadata aliases.
     """
+    # Determine base URL for CSP
+    base_url = settings.PUBLIC_BASE_URL or "https://api.360ghar.com"
+
     registered_count = 0
     for widget_name, config in WIDGETS.items():
         widget_html = load_widget_html(widget_name)
         if widget_html:
             resource_uri = f"ui://widget/{widget_name.lower()}.html"
 
-            # Create resource handler for this widget
-            @mcp.resource(
+            resource_meta = {
+                # --- MCP Apps standard (SEP-1865) keys ---
+                "ui": {
+                    "resourceUri": resource_uri,
+                    "visibility": "host",
+                    "csp": {
+                        "connectDomains": [
+                            base_url,
+                            "https://api.360ghar.com",
+                        ],
+                        "resourceDomains": [
+                            "https://images.360ghar.com",
+                            "https://*.cloudinary.com",
+                            "https://res.cloudinary.com",
+                        ],
+                    },
+                },
+                # --- Backward-compatible aliases ---
+                "ui/resourceUri": resource_uri,
+                "ui/visibility": "host",
+                "openai/widgetPrefersBorder": True,
+                "openai/widgetDomain": "https://chatgpt.com",
+                "openai/widgetDescription": config.get("description", ""),
+                "openai/widgetCSP": {
+                    "connect_domains": [
+                        base_url,
+                        "https://api.360ghar.com",
+                    ],
+                    "resource_domains": [
+                        "https://images.360ghar.com",
+                        "https://*.cloudinary.com",
+                        "https://res.cloudinary.com",
+                    ],
+                },
+            }
+
+            def make_widget_reader(html: str):
+                async def get_widget() -> str:
+                    return html
+
+                return get_widget
+
+            handler = make_widget_reader(widget_html)
+
+            mcp.resource(
                 resource_uri,
-                mime_type="text/html+skybridge",
+                mime_type="text/html",
                 name=config["title"],
                 description=config["description"],
-            )
-            async def get_widget(html=widget_html, name=widget_name):
-                return {
-                    "contents": [{
-                        "uri": f"ui://widget/{name.lower()}.html",
-                        "mimeType": "text/html+skybridge",
-                        "text": html,
-                        "_meta": {
-                            "openai/widgetPrefersBorder": True,
-                            "openai/widgetDomain": "https://chatgpt.com",
-                            "openai/widgetCSP": {
-                                "connect_domains": [
-                                    "https://api.360ghar.com",
-                                    "https://*.360ghar.com",
-                                ],
-                                "resource_domains": [
-                                    "https://images.360ghar.com",
-                                    "https://*.cloudinary.com",
-                                ],
-                            },
-                        },
-                    }]
-                }
+                meta=resource_meta,
+            )(handler)
 
             registered_count += 1
             logger.info(f"Registered ChatGPT widget: {widget_name} -> {resource_uri}")
