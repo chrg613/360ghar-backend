@@ -4,6 +4,8 @@
 --         colony approvals, gazette notifications, neighbourhood scores,
 --         and scraper run audit logs
 
+BEGIN;
+
 -- ---------------------------------------------------------------------------
 -- 1. circle_rates
 --    Circle rate data per sector for stamp duty calculation
@@ -28,7 +30,7 @@ CREATE TABLE IF NOT EXISTS circle_rates (
     UNIQUE(sector, colony, property_type, revision_year)
 );
 
-CREATE INDEX idx_circle_rates_slug ON circle_rates (slug);
+CREATE UNIQUE INDEX idx_circle_rates_slug ON circle_rates (slug);
 CREATE INDEX idx_circle_rates_sector_type ON circle_rates (sector, property_type);
 CREATE INDEX idx_circle_rates_revision_year ON circle_rates (revision_year DESC);
 
@@ -105,7 +107,7 @@ CREATE INDEX idx_bank_auctions_reserve_price ON bank_auctions (reserve_price) WH
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS auction_alerts (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     city VARCHAR(100) NOT NULL DEFAULT 'Gurugram',
     property_type VARCHAR(50),
     min_price NUMERIC(15,2),
@@ -188,7 +190,7 @@ CREATE TABLE IF NOT EXISTS zoning_data (
     UNIQUE(sector, land_use)
 );
 
-CREATE INDEX idx_zoning_data_slug ON zoning_data (slug);
+CREATE UNIQUE INDEX idx_zoning_data_slug ON zoning_data (slug);
 
 -- ---------------------------------------------------------------------------
 -- 8. colony_approvals
@@ -208,9 +210,16 @@ CREATE TABLE IF NOT EXISTS colony_approvals (
     source_url TEXT,
     raw_data JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(colony_name, licence_number)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Unique constraint that handles NULL licence_number correctly
+CREATE UNIQUE INDEX idx_colony_approvals_unique_with_licence
+    ON colony_approvals (colony_name, licence_number)
+    WHERE licence_number IS NOT NULL;
+CREATE UNIQUE INDEX idx_colony_approvals_unique_no_licence
+    ON colony_approvals (colony_name)
+    WHERE licence_number IS NULL;
 
 CREATE INDEX idx_colony_approvals_sector ON colony_approvals (sector);
 
@@ -233,9 +242,16 @@ CREATE TABLE IF NOT EXISTS gazette_notifications (
     source_url TEXT,
     raw_data JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(notification_number, notification_date)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Unique constraint that handles NULL notification_number
+CREATE UNIQUE INDEX idx_gazette_unique_with_number
+    ON gazette_notifications (notification_number, notification_date)
+    WHERE notification_number IS NOT NULL;
+CREATE UNIQUE INDEX idx_gazette_unique_no_number
+    ON gazette_notifications (title, notification_date)
+    WHERE notification_number IS NULL;
 
 CREATE INDEX idx_gazette_notifications_date ON gazette_notifications (notification_date DESC);
 CREATE INDEX idx_gazette_notifications_type ON gazette_notifications (notification_type);
@@ -305,7 +321,7 @@ CREATE INDEX idx_court_auctions_auction_date ON court_auctions (auction_date DES
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS neighbourhood_scores (
     id SERIAL PRIMARY KEY,
-    listing_id INTEGER REFERENCES properties(id) ON DELETE CASCADE,
+    listing_id BIGINT REFERENCES properties(id) ON DELETE CASCADE,
     latitude NUMERIC(10,7),
     longitude NUMERIC(10,7),
     overall_score INTEGER,           -- 0-100
@@ -325,8 +341,7 @@ CREATE TABLE IF NOT EXISTS neighbourhood_scores (
     UNIQUE(listing_id)
 );
 
-CREATE INDEX idx_neighbourhood_scores_stale ON neighbourhood_scores (stale_after) WHERE stale_after < now();
-CREATE INDEX idx_neighbourhood_scores_listing ON neighbourhood_scores (listing_id);
+CREATE INDEX idx_neighbourhood_scores_stale ON neighbourhood_scores (stale_after);
 
 -- ---------------------------------------------------------------------------
 -- 13. scraper_runs
@@ -336,7 +351,7 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
     id SERIAL PRIMARY KEY,
     scraper_name VARCHAR(100) NOT NULL,
     run_type VARCHAR(20) DEFAULT 'cron',  -- cron, manual, manual_override
-    triggered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    triggered_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, success, partial, failed
     records_found INTEGER DEFAULT 0,
     records_upserted INTEGER DEFAULT 0,
@@ -348,3 +363,53 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
 );
 
 CREATE INDEX idx_scraper_runs_name_started ON scraper_runs (scraper_name, started_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Auto-update updated_at on record changes
+-- (update_updated_at_column() function exists from initial schema migration)
+-- ---------------------------------------------------------------------------
+CREATE TRIGGER update_circle_rates_updated_at
+    BEFORE UPDATE ON circle_rates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_rera_projects_updated_at
+    BEFORE UPDATE ON rera_projects
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_bank_auctions_updated_at
+    BEFORE UPDATE ON bank_auctions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_auction_alerts_updated_at
+    BEFORE UPDATE ON auction_alerts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_bank_rates_updated_at
+    BEFORE UPDATE ON bank_rates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_zoning_data_updated_at
+    BEFORE UPDATE ON zoning_data
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_colony_approvals_updated_at
+    BEFORE UPDATE ON colony_approvals
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_gazette_notifications_updated_at
+    BEFORE UPDATE ON gazette_notifications
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_rera_complaints_updated_at
+    BEFORE UPDATE ON rera_complaints
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_court_auctions_updated_at
+    BEFORE UPDATE ON court_auctions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_neighbourhood_scores_updated_at
+    BEFORE UPDATE ON neighbourhood_scores
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMIT;
