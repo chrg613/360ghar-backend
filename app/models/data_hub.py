@@ -1,13 +1,16 @@
 from decimal import Decimal
 from datetime import datetime, date
 from typing import Optional, List
-from sqlalchemy import String, Text, Integer, Boolean, Date, DateTime, Numeric, BigInteger, JSON, ForeignKey, func
+from sqlalchemy import String, Text, Integer, Boolean, Date, DateTime, Numeric, BigInteger, JSON, ForeignKey, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import Enum as SQLEnum
 from app.core.database import Base
+from app.models.enums import ScraperStatus, AuctionSource, GazetteType, ComplaintNature
 
 
 class CircleRate(Base):
     __tablename__ = "circle_rates"
+    __table_args__ = (UniqueConstraint('sector', 'colony', 'property_type', 'revision_year', name='uq_circle_rates_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     district: Mapped[str] = mapped_column(String(100), nullable=False, default="Gurugram")
@@ -54,9 +57,10 @@ class ReraProject(Base):
 
 class BankAuction(Base):
     __tablename__ = "bank_auctions"
+    __table_args__ = (UniqueConstraint('bank_name', 'normalized_address_hash', 'auction_date', name='uq_bank_auctions_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(50), nullable=False)  # sarfaesi, ibapi, mstc
+    source: Mapped[AuctionSource] = mapped_column(SQLEnum(AuctionSource, name='auction_source'), nullable=False)
     bank_name: Mapped[str] = mapped_column(String(200), nullable=False)
     property_description: Mapped[str] = mapped_column(Text, nullable=False)
     property_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -91,7 +95,7 @@ class AuctionAlert(Base):
     max_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
     bank_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     keyword: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    alert_channels: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=lambda: ["email"])
+    alert_channels: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True, default=lambda: ["email"])
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -102,6 +106,7 @@ class AuctionAlert(Base):
 
 class BankRate(Base):
     __tablename__ = "bank_rates"
+    __table_args__ = (UniqueConstraint('bank_name', 'rate_type', 'effective_date', name='uq_bank_rates_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     bank_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -115,7 +120,9 @@ class BankRate(Base):
 
 
 class JamabandiCache(Base):
+    """Cached Jamabandi land records. No updated_at — rows are replaced, not updated."""
     __tablename__ = "jamabandi_cache"
+    __table_args__ = (UniqueConstraint('tehsil', 'village', 'khasra_number', name='uq_jamabandi_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tehsil: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -135,6 +142,7 @@ class JamabandiCache(Base):
 
 class ZoningData(Base):
     __tablename__ = "zoning_data"
+    __table_args__ = (UniqueConstraint('sector', 'land_use', name='uq_zoning_data_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sector: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -179,7 +187,7 @@ class GazetteNotification(Base):
     notification_number: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     notification_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
     department: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    notification_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    notification_type: Mapped[Optional[GazetteType]] = mapped_column(SQLEnum(GazetteType, name='gazette_type'), nullable=True, index=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     pdf_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -202,7 +210,7 @@ class ReraComplaint(Base):
     respondent_builder: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     respondent_project: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     rera_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
-    complaint_nature: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    complaint_nature: Mapped[Optional[ComplaintNature]] = mapped_column(SQLEnum(ComplaintNature, name='complaint_nature'), nullable=True)
     order_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     penalty_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
     direction_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -217,9 +225,10 @@ class ReraComplaint(Base):
 
 class CourtAuction(Base):
     __tablename__ = "court_auctions"
+    __table_args__ = (UniqueConstraint('case_number', 'auction_date', name='uq_court_auctions_key'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(50), nullable=False)  # drt, ecourts
+    source: Mapped[AuctionSource] = mapped_column(SQLEnum(AuctionSource, name='auction_source'), nullable=False)
     case_number: Mapped[str] = mapped_column(String(200), nullable=False)
     borrower_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     property_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -270,7 +279,7 @@ class ScraperRun(Base):
     scraper_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     run_type: Mapped[str] = mapped_column(String(20), nullable=False, default="cron")  # cron, manual, manual_override
     triggered_by: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    status: Mapped[ScraperStatus] = mapped_column(SQLEnum(ScraperStatus, name='scraper_status'), nullable=False, default=ScraperStatus.running)
     records_found: Mapped[int] = mapped_column(Integer, default=0)
     records_upserted: Mapped[int] = mapped_column(Integer, default=0)
     records_failed: Mapped[int] = mapped_column(Integer, default=0)

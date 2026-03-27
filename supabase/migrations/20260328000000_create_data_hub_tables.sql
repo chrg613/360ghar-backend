@@ -7,6 +7,14 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
+-- Enum types for data hub
+-- ---------------------------------------------------------------------------
+CREATE TYPE IF NOT EXISTS scraper_status AS ENUM ('running', 'success', 'partial', 'failed');
+CREATE TYPE IF NOT EXISTS auction_source AS ENUM ('sarfaesi', 'ibapi', 'mstc', 'drt', 'ecourts');
+CREATE TYPE IF NOT EXISTS gazette_type AS ENUM ('land_acquisition', 'rate_revision', 'policy', 'clu_change');
+CREATE TYPE IF NOT EXISTS complaint_nature AS ENUM ('delay', 'quality', 'refund', 'compensation', 'other');
+
+-- ---------------------------------------------------------------------------
 -- 1. circle_rates
 --    Circle rate data per sector for stamp duty calculation
 -- ---------------------------------------------------------------------------
@@ -41,7 +49,7 @@ CREATE INDEX idx_circle_rates_revision_year ON circle_rates (revision_year DESC)
 CREATE TABLE IF NOT EXISTS rera_projects (
     id SERIAL PRIMARY KEY,
     rera_number VARCHAR(200) NOT NULL UNIQUE,
-    project_name VARCHAR(500),
+    project_name VARCHAR(500) NOT NULL,
     developer_name VARCHAR(500),
     developer_slug VARCHAR(300),
     location VARCHAR(500),
@@ -71,9 +79,9 @@ CREATE INDEX idx_rera_projects_location ON rera_projects (location);
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS bank_auctions (
     id SERIAL PRIMARY KEY,
-    source VARCHAR(50),  -- sarfaesi, ibapi, mstc
-    bank_name VARCHAR(200),
-    property_description TEXT,
+    source auction_source NOT NULL,
+    bank_name VARCHAR(200) NOT NULL,
+    property_description TEXT NOT NULL,
     property_type VARCHAR(50),
     area_sqft NUMERIC(12,2),
     city VARCHAR(100) NOT NULL DEFAULT 'Gurugram',
@@ -132,7 +140,7 @@ CREATE TABLE IF NOT EXISTS bank_rates (
     bank_name VARCHAR(200) NOT NULL,  -- e.g. 'RBI', 'SBI', 'HDFC', 'ICICI', 'Axis', 'PNB'
     rate_type VARCHAR(50) NOT NULL,   -- repo, mclr_1y, mclr_3y, home_loan_min, home_loan_max
     rate_value NUMERIC(6,4) NOT NULL, -- percentage e.g. 6.5000
-    effective_date DATE NOT NULL,
+    effective_date DATE,
     source VARCHAR(200),
     raw_data JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -232,7 +240,7 @@ CREATE TABLE IF NOT EXISTS gazette_notifications (
     notification_number VARCHAR(200),
     notification_date DATE,
     department VARCHAR(200),
-    notification_type VARCHAR(100),  -- land_acquisition, rate_revision, policy, clu_change
+    notification_type gazette_type,
     title TEXT NOT NULL,
     summary TEXT,
     pdf_url TEXT,
@@ -269,7 +277,7 @@ CREATE TABLE IF NOT EXISTS rera_complaints (
     respondent_builder VARCHAR(300),
     respondent_project VARCHAR(500),
     rera_number VARCHAR(100),
-    complaint_nature VARCHAR(200),   -- delay, quality, refund, compensation
+    complaint_nature complaint_nature,
     order_summary TEXT,
     penalty_amount NUMERIC(15,2),
     direction_type VARCHAR(100),     -- refund, compensation, penalty, dismissal
@@ -292,7 +300,7 @@ CREATE INDEX idx_rera_complaints_order_date ON rera_complaints (order_date DESC)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS court_auctions (
     id SERIAL PRIMARY KEY,
-    source VARCHAR(50),  -- drt, ecourts
+    source auction_source NOT NULL,
     case_number VARCHAR(200) NOT NULL,
     borrower_name VARCHAR(300),
     property_description TEXT,
@@ -352,7 +360,7 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
     scraper_name VARCHAR(100) NOT NULL,
     run_type VARCHAR(20) DEFAULT 'cron',  -- cron, manual, manual_override
     triggered_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, success, partial, failed
+    status scraper_status NOT NULL DEFAULT 'running',
     records_found INTEGER DEFAULT 0,
     records_upserted INTEGER DEFAULT 0,
     records_failed INTEGER DEFAULT 0,
