@@ -2,7 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.exc import IntegrityError
 from typing import Optional, Dict, Any, List, Tuple
-from fastapi import HTTPException, status
+from app.core.exceptions import (
+    BaseAPIException, BadRequestException, ForbiddenException, InsufficientPermissionsError,
+)
 from app.models.users import User
 from app.models.enums import UserRole
 from app.schemas.user import UserUpdate
@@ -195,10 +197,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
         if actor is not None and actor.role == UserRole.agent.value and actor.id != user_id:
             # Ensure the agent is assigned to this user
             if actor.agent_id is None or user.agent_id != actor.agent_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Agent not authorized to update this user",
-                )
+                raise ForbiddenException(detail="Agent not authorized to update this user")
             allowed_fields = {
                 'email', 'full_name', 'phone', 'profile_image_url',
                 'preferences', 'notification_settings', 'privacy_settings'
@@ -225,21 +224,15 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
         logger.info(f"User {user_id} updated successfully")
         
         return user
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
+    except BaseAPIException:
+        # Re-raise custom API exceptions as-is
         raise
     except IntegrityError as e:
         logger.error(f"Integrity error updating user {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Data integrity constraint violated"
-        )
+        raise BadRequestException(detail="Data integrity constraint violated")
     except Exception as e:
         logger.error(f"Failed to update user {user_id}: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error occurred while updating user"
-        )
+        raise BaseAPIException(detail="Internal server error occurred while updating user")
 
 async def update_user_preferences(db: AsyncSession, user_id: int, preferences: dict) -> Optional[User]:
     logger.info(f"Updating preferences for user {user_id}")

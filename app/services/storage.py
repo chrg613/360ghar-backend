@@ -9,7 +9,16 @@ import os
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
+
+from app.core.exceptions import (
+    BaseAPIException,
+    BadRequestException,
+    FileTooLargeException,
+    InvalidFileException,
+    NotFoundException,
+    StorageException,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,7 +116,7 @@ class StorageService:
                 StorageFolder.DOCUMENT_GENERAL,
             )
             if not self._is_valid_upload(file, allow_documents=allow_documents):
-                raise HTTPException(status_code=400, detail="Invalid file type")
+                raise InvalidFileException(detail="Invalid file type")
 
             # Generate user-scoped path
             file_path = generate_storage_path(
@@ -135,7 +144,7 @@ class StorageService:
 
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Storage upload error: {response.error}")
-                raise HTTPException(status_code=500, detail="File upload failed")
+                raise StorageException(detail="File upload failed")
 
             # Get public URL
             public_url = self.supabase.storage.from_(self.bucket_name).get_public_url(file_path)
@@ -166,11 +175,11 @@ class StorageService:
                 "media": media,
             }
 
-        except HTTPException:
+        except BaseAPIException:
             raise
         except Exception as e:
             logger.error(f"File upload error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+            raise StorageException(detail=f"File upload failed: {str(e)}")
 
     # ============================================================
     # Legacy Upload Methods (maintained for backward compatibility)
@@ -221,7 +230,7 @@ class StorageService:
         # Agent avatars use a special path at the root level
         try:
             if not self._is_valid_upload(file):
-                raise HTTPException(status_code=400, detail="Invalid file type")
+                raise InvalidFileException(detail="Invalid file type")
 
             file_extension = self._get_file_extension(file.filename, content_type=file.content_type)
             unique_filename = f"{uuid.uuid4()}{file_extension}"
@@ -241,7 +250,7 @@ class StorageService:
 
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Storage upload error: {response.error}")
-                raise HTTPException(status_code=500, detail="File upload failed")
+                raise StorageException(detail="File upload failed")
 
             public_url = self.supabase.storage.from_(self.bucket_name).get_public_url(file_path)
 
@@ -254,9 +263,11 @@ class StorageService:
                 "original_filename": file.filename
             }
 
+        except BaseAPIException:
+            raise
         except Exception as e:
             logger.error(f"Agent avatar upload error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+            raise StorageException(detail=f"File upload failed: {str(e)}")
 
     async def upload_generic(
         self,
@@ -369,18 +380,17 @@ class StorageService:
             Dict with upload_id, signed_url, token, path, public_url
         """
         if not filename:
-            raise HTTPException(status_code=400, detail="Filename is required")
+            raise BadRequestException(detail="Filename is required")
 
         if file_size is not None:
             try:
                 parsed_size = int(file_size)
             except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail="Invalid file_size") from None
+                raise BadRequestException(detail="Invalid file_size") from None
             if parsed_size < 0:
-                raise HTTPException(status_code=400, detail="Invalid file_size")
+                raise BadRequestException(detail="Invalid file_size")
             if parsed_size > self._max_upload_bytes:
-                raise HTTPException(
-                    status_code=413,
+                raise FileTooLargeException(
                     detail=f"File too large. Maximum size is {self._max_upload_bytes // (1024 * 1024)}MB",
                 )
 
@@ -400,7 +410,7 @@ class StorageService:
             if inferred and self._is_valid_content_type(inferred, allow_documents=allow_documents):
                 normalized_content_type = inferred
             else:
-                raise HTTPException(status_code=400, detail="Invalid file type")
+                raise InvalidFileException(detail="Invalid file type")
 
         # Generate user-scoped path
         file_path = generate_storage_path(
@@ -463,7 +473,7 @@ class StorageService:
             Updated MediaFile record
 
         Raises:
-            HTTPException: If upload not found, not owned by user, or file not in storage
+            NotFoundException: If upload not found, not owned by user, or file not in storage
         """
         # Find the MediaFile record
         query = select(MediaFile).where(
@@ -474,7 +484,7 @@ class StorageService:
         media = result.scalar_one_or_none()
 
         if not media:
-            raise HTTPException(status_code=404, detail="Upload not found")
+            raise NotFoundException(detail="Upload not found")
 
         if media.upload_status == "complete":
             return media  # Already confirmed
@@ -493,9 +503,9 @@ class StorageService:
                 logger.warning(f"Upload confirmation failed: file not found at {storage_path}")
                 media.upload_status = "failed"
                 await db.flush()
-                raise HTTPException(status_code=404, detail="File not found in storage")
+                raise NotFoundException(detail="File not found in storage")
 
-        except HTTPException:
+        except BaseAPIException:
             raise
         except Exception as e:
             logger.error(f"Error verifying upload: {str(e)}")
@@ -556,7 +566,7 @@ class StorageService:
         try:
             # Validate file type
             if file.content_type not in self._valid_image_types:
-                raise HTTPException(status_code=400, detail="Invalid image type")
+                raise InvalidFileException(detail="Invalid image type")
 
             # Read file content
             file_content = await file.read()
@@ -586,7 +596,7 @@ class StorageService:
             )
 
             if hasattr(original_result, 'error') and original_result.error:
-                raise HTTPException(status_code=500, detail="Failed to upload original image")
+                raise StorageException(detail="Failed to upload original image")
 
             original_url = self.supabase.storage.from_(self.bucket_name).get_public_url(original_path)
 
@@ -658,11 +668,11 @@ class StorageService:
                 "file_size": len(file_content),
             }
 
-        except HTTPException:
+        except BaseAPIException:
             raise
         except Exception as e:
             logger.error(f"Scene image upload error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Scene image upload failed: {str(e)}")
+            raise StorageException(detail=f"Scene image upload failed: {str(e)}")
 
     async def process_existing_scene_image(
         self,
@@ -782,7 +792,7 @@ class StorageService:
         try:
             # Validate file type
             if not self._is_valid_upload(file, allow_documents=allow_documents):
-                raise HTTPException(status_code=400, detail="Invalid file type")
+                raise InvalidFileException(detail="Invalid file type")
 
             # Generate unique filename
             file_extension = self._get_file_extension(file.filename, content_type=file.content_type)
@@ -806,7 +816,7 @@ class StorageService:
 
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Storage upload error: {response.error}")
-                raise HTTPException(status_code=500, detail="File upload failed")
+                raise StorageException(detail="File upload failed")
 
             # Get public URL
             public_url = self.supabase.storage.from_(target_bucket).get_public_url(file_path)
@@ -820,11 +830,11 @@ class StorageService:
                 "original_filename": file.filename
             }
 
-        except HTTPException:
+        except BaseAPIException:
             raise
         except Exception as e:
             logger.error(f"File upload error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+            raise StorageException(detail=f"File upload failed: {str(e)}")
 
     async def _create_media_record(
         self,

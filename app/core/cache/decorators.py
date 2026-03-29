@@ -5,9 +5,7 @@ Caching decorators for FastAPI endpoints and service functions.
 import functools
 from typing import Any, Awaitable, Callable, List, Optional, TypeVar, Union
 
-from fastapi import Request
-
-from app.core.cache.keys import build_cache_key, generate_hash
+from app.core.cache.keys import build_cache_key
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -109,103 +107,6 @@ def cached(
                     logger.debug(f"Cache set: {cache_key}")
                 except Exception as e:
                     logger.warning(f"Cache set error: {e}")
-
-            return result
-
-        return wrapper
-
-    return decorator
-
-
-def cache_response(
-    prefix: str,
-    ttl: int = 300,
-    key_builder: Optional[Callable[[Request], str]] = None,
-    vary_by_user: bool = False,
-) -> Callable:
-    """Decorator specifically for FastAPI endpoint responses.
-
-    This decorator works with the Request object to build cache keys
-    from query parameters automatically.
-
-    Args:
-        prefix: Cache key prefix
-        ttl: TTL in seconds
-        key_builder: Custom key builder function
-        vary_by_user: Whether to vary cache by authenticated user
-
-    Usage:
-        @router.get("/amenities/")
-        @cache_response("amenities", ttl=86400)
-        async def list_amenities(db: AsyncSession = Depends(get_db)):
-            ...
-    """
-
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            from app.core.cache import get_cache_manager
-
-            cache = get_cache_manager()
-
-            if not cache.is_available():
-                return await func(*args, **kwargs)
-
-            # Try to find Request in args/kwargs
-            request = kwargs.get("request")
-            if request is None:
-                for arg in args:
-                    if isinstance(arg, Request):
-                        request = arg
-                        break
-
-            # Build cache key
-            if key_builder and request:
-                cache_key = key_builder(request)
-            elif request:
-                user_id = None
-                if vary_by_user:
-                    current_user = kwargs.get("current_user")
-                    user_id = (
-                        getattr(current_user, "id", None) if current_user else None
-                    )
-
-                params_hash = generate_hash(dict(request.query_params))
-                cache_key = build_cache_key(
-                    prefix,
-                    request.url.path,
-                    params_hash,
-                    include_user=vary_by_user,
-                    user_id=user_id,
-                )
-            else:
-                # Fallback: hash relevant kwargs
-                key_kwargs = {
-                    k: v
-                    for k, v in kwargs.items()
-                    if k not in ("db", "current_user", "request", "session")
-                }
-                cache_key = build_cache_key(prefix, generate_hash(key_kwargs))
-
-            # Try cache
-            try:
-                cached = await cache.get(cache_key)
-                if cached is not None:
-                    logger.debug(f"Response cache hit: {cache_key}")
-                    return cached
-            except Exception as e:
-                logger.warning(f"Response cache get error: {e}")
-
-            # Execute endpoint
-            result = await func(*args, **kwargs)
-
-            # Cache result
-            try:
-                cache_value = _serialize_for_cache(result)
-                await cache.set(cache_key, cache_value, ttl)
-                logger.debug(f"Response cache set: {cache_key}")
-            except Exception as e:
-                logger.warning(f"Response cache set error: {e}")
 
             return result
 

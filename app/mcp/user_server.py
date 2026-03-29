@@ -35,7 +35,6 @@ from app.mcp.errors import (
     internal_error_response,
     invalid_input_response,
     not_found_response,
-    unauthorized_response,
 )
 from app.mcp.utils import (
     get_db,

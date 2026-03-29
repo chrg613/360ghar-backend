@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BaseAPIException
 from app.models.users import User
 from app.models.enums import UserRole
 
@@ -174,3 +175,40 @@ class TestUserRoles:
     async def test_agent_user_has_agent_role(self, test_agent_user):
         """Test agent user has correct role."""
         assert test_agent_user.role == UserRole.agent.value
+
+
+class TestUpdateUser:
+    """Tests for update_user function."""
+
+    @pytest.mark.asyncio
+    async def test_update_user_unexpected_error_is_wrapped(self):
+        """Unexpected update errors should stay in the standard API envelope."""
+        from app.schemas.user import UserUpdate
+        from app.services.user import update_user
+
+        db = AsyncMock(spec=AsyncSession)
+        db.flush.side_effect = RuntimeError("boom")
+
+        existing_user = User(
+            id=1,
+            supabase_user_id=str(uuid.uuid4()),
+            phone="+919876543210",
+            email="test@example.com",
+            full_name="Test User",
+            role=UserRole.user.value,
+            is_active=True,
+        )
+
+        with patch("app.services.user.get_user_by_id", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = existing_user
+
+            with pytest.raises(BaseAPIException) as exc_info:
+                await update_user(
+                    db,
+                    1,
+                    UserUpdate(full_name="Updated Name"),
+                    actor=existing_user,
+                )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Internal server error occurred while updating user"

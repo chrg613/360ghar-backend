@@ -3,9 +3,9 @@ import random
 from typing import List, Dict, Any, Tuple
 
 import httpx
-from fastapi import HTTPException, status
 
 from app.core.config import settings
+from app.core.exceptions import BaseAPIException, ExternalServiceError, ServiceUnavailableException
 from app.core.logging import get_logger
 from app.schemas.blog import BlogPostCreate
 from app.services.blog import create_blog_post
@@ -43,7 +43,7 @@ def _build_excerpt_from_html(html: str, max_len: int = 280) -> str:
 
 async def _perplexity_generate(topic: str) -> Dict[str, str]:
     if not settings.PERPLEXITY_API_KEY:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="PERPLEXITY_API_KEY not configured")
+        raise ServiceUnavailableException(detail="PERPLEXITY_API_KEY not configured")
 
     url = "https://api.perplexity.ai/chat/completions"
     headers = {
@@ -118,7 +118,7 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
         resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
             logger.error(f"Perplexity API error {resp.status_code}: {resp.text}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Perplexity generation failed")
+            raise ExternalServiceError(detail="Perplexity generation failed")
 
         data = resp.json()
 
@@ -127,23 +127,23 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
         content = data["choices"][0]["message"]["content"]
     except Exception:
         logger.error(f"Unexpected Perplexity response schema: {data}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity response")
+        raise ExternalServiceError(detail="Invalid Perplexity response")
 
     try:
         parsed = json.loads(content)
     except Exception as e:
         logger.error(f"Failed to parse Perplexity JSON content: {e} | content={content}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid JSON from Perplexity")
+        raise ExternalServiceError(detail="Invalid JSON from Perplexity")
 
     if not isinstance(parsed, dict):
         logger.error(f"Perplexity JSON root is not an object: {parsed}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity JSON shape")
+        raise ExternalServiceError(detail="Invalid Perplexity JSON shape")
 
     title = parsed.get("title")
     content_html = parsed.get("content_html")
 
     if not title or not content_html:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Perplexity did not return content")
+        raise ExternalServiceError(detail="Perplexity did not return content")
 
     # Final HTML sanitization for safety
     safe_html = ValidationUtils.sanitize_html(content_html)
@@ -228,7 +228,7 @@ async def generate_draft_from_topic(db, *, topic: str, actor) -> Dict[str, Any]:
 async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
     # Generate topic ideas first
     if not settings.PERPLEXITY_API_KEY:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="PERPLEXITY_API_KEY not configured")
+        raise ServiceUnavailableException(detail="PERPLEXITY_API_KEY not configured")
 
     categories_str = "\n- ".join(BLOG_CATEGORIES)
     url = "https://api.perplexity.ai/chat/completions"
@@ -285,29 +285,29 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
         resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
             logger.error(f"Perplexity topic generation error {resp.status_code}: {resp.text}")
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Perplexity topic generation failed")
+            raise ExternalServiceError(detail="Perplexity topic generation failed")
         data = resp.json()
 
     try:
         content = data["choices"][0]["message"]["content"]
     except Exception:
         logger.error(f"Unexpected Perplexity response schema for topics: {data}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity response")
+        raise ExternalServiceError(detail="Invalid Perplexity response")
 
     try:
         parsed = json.loads(content)
     except Exception as e:
         logger.error(f"Failed to parse Perplexity topics JSON content: {e} | content={content}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid JSON from Perplexity")
+        raise ExternalServiceError(detail="Invalid JSON from Perplexity")
 
     if not isinstance(parsed, dict):
         logger.error(f"Perplexity topics JSON root is not an object: {parsed}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity JSON shape")
+        raise ExternalServiceError(detail="Invalid Perplexity JSON shape")
 
     raw_topics = parsed.get("topics") or []
     if not isinstance(raw_topics, list):
         logger.error(f"Perplexity topics JSON 'topics' is not a list: {parsed}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid Perplexity topics JSON")
+        raise ExternalServiceError(detail="Invalid Perplexity topics JSON")
 
     topics: List[str] = [str(t).strip() for t in raw_topics if str(t).strip()]
 
@@ -327,7 +327,7 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
         try:
             draft = await generate_draft_from_topic(db, topic=t, actor=actor)
             results.append(draft)
-        except HTTPException:
+        except BaseAPIException:
             raise
         except Exception as e:
             logger.error(f"Failed to generate draft for topic '{t}': {e}")

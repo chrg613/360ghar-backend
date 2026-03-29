@@ -216,10 +216,13 @@ class TestMCPErrorResponses:
     """Tests for MCP error response formats."""
 
     def test_unauthorized_response(self):
-        """Test unauthorized error response format."""
-        from app.mcp.errors import unauthorized_response
+        """Test unauthorized error response format using MCPResponse.failure."""
+        from app.mcp.errors import MCPResponse, MCPErrorCode
 
-        result = unauthorized_response("Test message")
+        result = MCPResponse.failure(
+            code=MCPErrorCode.UNAUTHORIZED,
+            message="Test message",
+        ).model_dump()
 
         assert "error" in result
         assert result["error"]["code"] == "UNAUTHORIZED"

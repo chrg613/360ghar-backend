@@ -95,6 +95,33 @@ class ServiceUnavailableException(BaseAPIException):
     detail = "Service temporarily unavailable"
 
 
+class ExternalServiceError(BaseAPIException):
+    """External service (AI provider, payment gateway, etc.) returned an error"""
+    status_code = status.HTTP_502_BAD_GATEWAY
+    error_code = "EXTERNAL_SERVICE_ERROR"
+    detail = "External service error"
+
+
+class StorageException(BaseAPIException):
+    """Storage operation failed"""
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_code = "STORAGE_ERROR"
+    detail = "Storage operation failed"
+
+
+class FileTooLargeException(BaseAPIException):
+    """Uploaded file exceeds the configured size limit"""
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    error_code = "FILE_TOO_LARGE"
+    detail = "File too large"
+
+
+class InvalidFileException(BadRequestException):
+    """Uploaded file is invalid (wrong type, too large, etc.)"""
+    error_code = "INVALID_FILE"
+    detail = "Invalid file"
+
+
 # Domain-specific exceptions
 class PropertyNotFoundException(NotFoundException):
     """Property not found exception"""
@@ -167,3 +194,34 @@ class HotspotNotFoundException(NotFoundException):
     """Hotspot not found exception"""
     error_code = "HOTSPOT_NOT_FOUND"
     detail = "Hotspot not found"
+
+
+# Blog-specific exceptions
+class BlogNotFoundException(NotFoundException):
+    """Blog post not found exception"""
+    error_code = "BLOG_NOT_FOUND"
+    detail = "Blog post not found"
+
+
+class CategoryNotFoundException(NotFoundException):
+    """Blog category not found exception"""
+    error_code = "CATEGORY_NOT_FOUND"
+    detail = "Category not found"
+
+
+class TagNotFoundException(NotFoundException):
+    """Blog tag not found exception"""
+    error_code = "TAG_NOT_FOUND"
+    detail = "Tag not found"
+
+
+class LeaseNotFoundException(NotFoundException):
+    """Lease not found exception"""
+    error_code = "LEASE_NOT_FOUND"
+    detail = "Lease not found"
+
+
+class MaintenanceRequestNotFoundException(NotFoundException):
+    """Maintenance request not found exception"""
+    error_code = "MAINTENANCE_REQUEST_NOT_FOUND"
+    detail = "Maintenance request not found"

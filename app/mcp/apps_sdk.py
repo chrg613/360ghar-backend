@@ -109,15 +109,8 @@ class AuthRequiredError(ToolError):
 
 def _public_base_url() -> str:
     """Return the public base URL (scheme+host) for discovery metadata."""
-    if settings.PUBLIC_BASE_URL:
-        return settings.PUBLIC_BASE_URL.rstrip("/")
-    if settings.ENVIRONMENT == "production":
-        return "https://api.360ghar.com"
-    try:
-        request = get_http_request()
-        return str(request.base_url).rstrip("/")
-    except Exception:
-        return "https://api.360ghar.com"
+    from app.mcp.auth_provider import get_public_base_url
+    return get_public_base_url()
 
 
 def _resource_metadata_url_for_current_request() -> str:

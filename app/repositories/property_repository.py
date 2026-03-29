@@ -8,6 +8,7 @@ from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
 from app.models.properties import Property, PropertyAmenity
 from app.models.users import User
@@ -196,6 +197,6 @@ class PropertyRepository(BaseRepository[Property]):
             order_expressions = [_apply_direction(relevance_expr)]
         else:
             logger.error("Unsupported sort option: %s", sort_by)
-            raise ValueError(f"Unsupported sort option: {sort_by}")
+            raise BadRequestException(detail=f"Unsupported sort option: {sort_by}")
 
         return stmt.order_by(*order_expressions)

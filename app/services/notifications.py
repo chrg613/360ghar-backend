@@ -9,6 +9,7 @@ import httpx
 from app.core.config import settings
 from app.core.auth import get_supabase_service_client
 from app.core.logging import get_logger
+from app.core.exceptions import BadRequestException
 from app.core.utils import utc_now_iso
 from app.services.notification_config import (
     NOTIFICATION_TYPES,
@@ -110,7 +111,7 @@ def build_message(
     elif topic:
         msg["message"]["topic"] = topic
     else:
-        raise ValueError("Either token or topic must be provided")
+        raise BadRequestException(detail="Either token or topic must be provided")
 
     if title or body or image:
         msg["message"]["notification"] = {

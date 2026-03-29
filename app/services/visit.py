@@ -7,6 +7,7 @@ from app.models.agents import Agent
 from app.models.users import User
 from app.schemas.visit import VisitCreate, VisitUpdate, Visit as VisitSchema
 from app.core.utils import make_tz_aware
+from app.core.exceptions import BadRequestException
 from typing import Optional
 
 async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
@@ -17,14 +18,14 @@ async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     # Basic validation: scheduled date must be in the future
     scheduled_date = visit_data.get("scheduled_date")
     if scheduled_date is None:
-        raise ValueError("scheduled_date is required")
+        raise BadRequestException(detail="scheduled_date is required")
     if scheduled_date.tzinfo is None:
         # Treat naive datetimes as UTC to avoid naive/aware comparison errors
         scheduled_date = scheduled_date.replace(tzinfo=timezone.utc)
         visit_data["scheduled_date"] = scheduled_date
     now = datetime.now(timezone.utc)
     if scheduled_date < now:
-        raise ValueError("scheduled_date must be in the future")
+        raise BadRequestException(detail="scheduled_date must be in the future")
     
     db_visit = Visit(**visit_data)
     db.add(db_visit)

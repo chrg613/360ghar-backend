@@ -18,7 +18,12 @@ from app.models.properties import Property, PropertyAmenity
 from app.models.users import User
 
 
-def _get_actor_role(actor: User) -> UserRole:
+def _get_actor_role(actor) -> UserRole:
+    """Safely convert actor role to UserRole enum.
+
+    Accepts both User (SQLAlchemy) and UserSchema (Pydantic) objects
+    since both expose a ``role`` attribute.
+    """
     try:
         return UserRole(actor.role)
     except ValueError:

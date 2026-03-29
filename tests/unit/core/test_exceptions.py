@@ -15,6 +15,7 @@ from app.core.exceptions import (
     BadRequestException,
     RateLimitException,
     ServiceUnavailableException,
+    FileTooLargeException,
     PropertyNotFoundException,
     UserNotFoundException,
     AgentNotFoundException,
@@ -185,6 +186,16 @@ class TestServiceUnavailableException:
         exc = ServiceUnavailableException()
         assert exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
         assert exc.detail == "Service temporarily unavailable"
+
+
+class TestPayloadExceptions:
+    """Tests for payload-size related exceptions."""
+
+    def test_file_too_large_exception(self):
+        """Test FileTooLargeException defaults."""
+        exc = FileTooLargeException()
+        assert exc.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+        assert exc.detail == "File too large"
 
 
 class TestExceptionInheritance:

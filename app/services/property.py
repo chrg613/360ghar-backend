@@ -36,6 +36,7 @@ from app.core.exceptions import (
 )
 from app.models.enums import PropertyPurpose, PropertyType, UserRole
 from app.repositories.property_repository import PropertyRepository
+from app.services.pm_authz import _get_actor_role
 from app.vector.embedding_client import embed_query
 
 vector_metadata = MetaData()
@@ -53,17 +54,6 @@ TEXT_WEIGHT = 0.4
 
 logger = get_logger(__name__)
 PG_FLATMATE_TYPES = {PropertyType.pg, PropertyType.flatmate}
-
-
-def _get_actor_role(actor: UserSchema) -> UserRole:
-    """Safely convert actor role to enum."""
-    try:
-        return UserRole(actor.role)
-    except ValueError:
-        logger.warning(
-            "Unknown user role provided", extra={"user_id": actor.id, "role": actor.role}
-        )
-        return UserRole.user
 
 
 def _validate_listing_contract(property_type: PropertyType, purpose: PropertyPurpose) -> None:

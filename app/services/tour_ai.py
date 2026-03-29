@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import httpx
-from fastapi import HTTPException, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
@@ -23,6 +22,12 @@ from tenacity import (
 )
 
 from app.core.database import get_async_session_factory
+from app.core.exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    NotFoundException,
+    ServiceUnavailableException,
+)
 from app.core.logging import get_logger
 from app.core.utils import utc_now
 from app.core.websocket import manager as ws_manager
@@ -250,8 +255,7 @@ async def _get_ai_provider_safe():
         return get_ai_provider()
     except ValueError as e:
         logger.error(f"Failed to get AI provider: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        raise ServiceUnavailableException(
             detail="AI service is not configured. Please set GOOGLE_API_KEY."
         )
 
@@ -299,7 +303,7 @@ async def update_job_status(
     job = db_result.scalar_one_or_none()
 
     if not job:
-        raise HTTPException(status_code=404, detail="AI job not found")
+        raise NotFoundException(detail="AI job not found")
 
     job.status = status
     job.progress = progress
@@ -359,7 +363,7 @@ async def get_ai_job(
     job = result.scalar_one_or_none()
 
     if not job:
-        raise HTTPException(status_code=404, detail="AI job not found")
+        raise NotFoundException(detail="AI job not found")
 
     return job
 
@@ -424,7 +428,7 @@ async def analyze_scene(
     scene = await get_scene(db, scene_id, user_id)
 
     if scene.tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     # Create job
     job = await create_ai_job(db, user_id, "analyze_scene", scene_id=scene_id)
@@ -446,10 +450,10 @@ async def analyze_tour_scenes(
     tour = await get_tour(db, tour_id, user_id, include_scenes=True)
 
     if tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     if not tour.scenes:
-        raise HTTPException(status_code=400, detail="Tour has no scenes to analyze")
+        raise BadRequestException(detail="Tour has no scenes to analyze")
 
     # Create job
     job = await create_ai_job(db, user_id, "analyze_scenes", tour_id=tour_id)
@@ -587,7 +591,7 @@ async def suggest_scene_hotspots(
     scene = await get_scene(db, scene_id, user_id)
 
     if scene.tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     # Get all scenes in the tour for navigation suggestions
     scenes = await get_scenes(db, scene.tour_id, user_id)
@@ -612,10 +616,10 @@ async def suggest_tour_hotspots(
     tour = await get_tour(db, tour_id, user_id, include_scenes=True)
 
     if tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     if not tour.scenes or len(tour.scenes) < 2:
-        raise HTTPException(status_code=400, detail="Tour needs at least 2 scenes for hotspot suggestions")
+        raise BadRequestException(detail="Tour needs at least 2 scenes for hotspot suggestions")
 
     # Create job
     job = await create_ai_job(db, user_id, "suggest_tour_hotspots", tour_id=tour_id)
@@ -786,7 +790,7 @@ async def generate_scene_description(
     scene = await get_scene(db, scene_id, user_id)
 
     if scene.tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     # Create job
     job = await create_ai_job(db, user_id, "generate_description", scene_id=scene_id)
@@ -809,10 +813,10 @@ async def generate_tour_descriptions(
     tour = await get_tour(db, tour_id, user_id, include_scenes=True)
 
     if tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     if not tour.scenes:
-        raise HTTPException(status_code=400, detail="Tour has no scenes")
+        raise BadRequestException(detail="Tour has no scenes")
 
     # Create job
     job = await create_ai_job(db, user_id, "generate_descriptions", tour_id=tour_id)
@@ -971,7 +975,7 @@ async def apply_scene_analysis(
     tour = await get_tour(db, tour_id, user_id, include_scenes=False)
 
     if tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     updated_count = 0
 
@@ -1015,7 +1019,7 @@ async def apply_hotspot_suggestions(
     scene = await get_scene(db, scene_id, user_id)
 
     if scene.tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     # Get suggestions from job result if job_id provided
     hotspot_suggestions = []
@@ -1078,7 +1082,7 @@ async def generate_tour(
         ]
 
     if not scenes_input:
-        raise HTTPException(status_code=400, detail="At least one scene image is required")
+        raise BadRequestException(detail="At least one scene image is required")
 
     tour = Tour(
         id=str(uuid4()),
@@ -1104,7 +1108,7 @@ async def generate_tour(
 
         image_url = scene_payload.get("image_url")
         if not image_url:
-            raise HTTPException(status_code=400, detail="Scene image_url is required")
+            raise BadRequestException(detail="Scene image_url is required")
 
         metadata = scene_payload.get("metadata") or scene_payload.get("scene_metadata")
         if metadata and not isinstance(metadata, dict):
@@ -1251,7 +1255,7 @@ async def optimize_tour(
     tour = await get_tour(db, tour_id, user_id, include_scenes=True)
 
     if tour.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise ForbiddenException(detail="Access denied")
 
     job = await create_ai_job(db, user_id, "optimize_tour", tour_id=tour_id)
 

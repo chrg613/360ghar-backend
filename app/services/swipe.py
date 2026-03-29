@@ -5,6 +5,8 @@ from typing import Optional
 from app.models.users import UserSwipe
 from app.models.properties import Property, PropertyAmenity, Amenity
 from app.schemas.property import PropertySwipe, UnifiedPropertyFilter, SortBy
+from app.repositories.property_query_builder import PropertyQueryBuilder
+
 
 async def record_swipe(db: AsyncSession, user_id: int, swipe_data: PropertySwipe):
     """Record or update swipe"""

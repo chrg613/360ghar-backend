@@ -9,6 +9,8 @@ from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
+from app.core.exceptions import BadRequestException
+
 
 class StorageFolder(Enum):
     """Predefined folder types for organized storage.
@@ -142,25 +144,25 @@ def generate_storage_path(
     # Handle property_id placeholder
     if "{property_id}" in folder_path:
         if property_id is None:
-            raise ValueError("property_id required for this folder type")
+            raise BadRequestException(detail="property_id required for this folder type")
         folder_path = folder_path.replace("{property_id}", str(property_id))
 
     # Handle tour_id placeholder
     if "{tour_id}" in folder_path:
         if tour_id is None:
-            raise ValueError("tour_id required for this folder type")
+            raise BadRequestException(detail="tour_id required for this folder type")
         folder_path = folder_path.replace("{tour_id}", tour_id)
 
     # Handle scene_id placeholder
     if "{scene_id}" in folder_path:
         if scene_id is None:
-            raise ValueError("scene_id required for this folder type")
+            raise BadRequestException(detail="scene_id required for this folder type")
         folder_path = folder_path.replace("{scene_id}", scene_id)
 
     # Handle agent_id placeholder (NOT user-scoped)
     if "{agent_id}" in folder_path:
         if agent_id is None:
-            raise ValueError("agent_id required for this folder type")
+            raise BadRequestException(detail="agent_id required for this folder type")
         folder_path = folder_path.replace("{agent_id}", str(agent_id))
         # Agent paths are at root level, not user-scoped
         return f"{folder_path}/{file_name}"

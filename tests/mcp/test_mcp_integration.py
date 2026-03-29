@@ -8,6 +8,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _setup_in_memory_cache():
+    """Provide a connected in-memory cache for OAuth token store tests."""
+    from app.core.cache import set_cache_manager
+    from app.core.cache.manager import CacheManager
+    from app.core.cache.backends.memory import InMemoryCacheBackend
+
+    backend = InMemoryCacheBackend(max_size=500)
+    manager = CacheManager(backend=backend)
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(manager.connect())
+    set_cache_manager(manager)
+    yield
+    loop.run_until_complete(manager.disconnect())
+    loop.close()
+    set_cache_manager(None)
+
+
 def get_tool_fn(tool):
     """Extract the underlying function from a FunctionTool object."""
     return tool.fn if hasattr(tool, 'fn') else tool

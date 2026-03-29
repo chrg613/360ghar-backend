@@ -9,6 +9,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.exceptions import ConflictException, NotFoundException
 from app.models.tours import CustomDomain
 from app.schemas.custom_domain import (
     CustomDomainCreate,
@@ -44,7 +45,7 @@ async def create_custom_domain(
             # Return existing domain for this user
             return CustomDomainResponse.model_validate(existing)
         else:
-            raise ValueError("Domain is already registered by another user")
+            raise ConflictException(detail="Domain is already registered by another user")
 
     # Create new domain
     verification_token = generate_verification_token()
@@ -113,7 +114,7 @@ async def verify_domain(
     domain = result.scalar_one_or_none()
 
     if not domain:
-        raise ValueError("Domain not found")
+        raise NotFoundException(detail="Domain not found")
 
     txt_record_name = f"_360ghar-verify.{domain.domain}"
     txt_record_value = domain.verification_token or ""

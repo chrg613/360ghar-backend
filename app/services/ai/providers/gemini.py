@@ -5,8 +5,6 @@ This module implements the AIProvider interface for Google's Gemini models,
 supporting both text and vision (image) inputs.
 """
 
-import json
-import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -242,34 +240,3 @@ class GeminiProvider(AIProvider):
                 message=f"Invalid response structure: {e}",
                 provider=self.name,
             )
-
-    def _parse_json_response(self, text: str) -> Dict[str, Any]:
-        """Parse JSON from response text."""
-        try:
-            # First try direct parsing
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON from markdown code blocks
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-        # Try to find JSON object in text
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
-
-        logger.error(f"Failed to parse JSON from Gemini response: {text[:500]}")
-        raise AIProviderError(
-            message="Failed to parse JSON from response",
-            provider=self.name,
-            response_body=text[:1000],
-        )

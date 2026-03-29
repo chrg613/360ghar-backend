@@ -1,26 +1,35 @@
-# 360Ghar ChatGPT App
+# 360Ghar MCP Widgets
 
-This directory contains the ChatGPT App integration for 360Ghar, enabling users to interact with the real estate platform through ChatGPT's conversational interface.
+This directory contains the interactive widget system for 360Ghar's MCP servers, enabling rich UI experiences across **all MCP-compatible hosts** — ChatGPT Apps, Claude Desktop, Cursor, VS Code Copilot, Gemini, MCPJam, and any MCP-compliant client.
 
 ## Architecture
 
-The ChatGPT App is built on the **Model Context Protocol (MCP)** standard and consists of:
+The widgets are built on the **Model Context Protocol (MCP)** standard and consist of:
 
-1. **MCP Server** (`/mcp`) - Exposes tools that ChatGPT can call
-2. **Widget UI** (`chatgpt-widgets/`) - React components rendered in ChatGPT iframes
-3. **Response Formatters** - Format tool outputs for ChatGPT consumption
+1. **MCP Server** (`/mcp`) - Exposes tools that any MCP client can call
+2. **Widget UI** (`chatgpt-widgets/`) - React components rendered in host iframes
+3. **Unified Bridge** - Runtime-detected API layer that works on all hosts
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│     ChatGPT     │────▶│   MCP Server    │────▶│   360Ghar API   │
-│  (User Chat)    │◀────│   (/mcp)        │◀────│   (Backend)     │
-└────────┬────────┘     └─────────────────┘     └─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Widget iframe  │
-│  (Rich UI)      │
-└─────────────────┘
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│   ChatGPT   │  │   Claude    │  │   Cursor    │  │  VS Code    │
+│   (OpenAI)  │  │  Desktop    │  │             │  │  Copilot    │
+└──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+       │                │                │                │
+       └────────────────┴────────────────┴────────────────┘
+                                │
+                                ▼
+                  ┌─────────────────────────┐
+                  │    MCP Server (/mcp)     │────▶ 360Ghar API
+                  │  (AppsSDKFastMCP)        │◀──── (Backend)
+                  └───────────┬─────────────┘
+                              │
+                              ▼
+                  ┌─────────────────────────┐
+                  │  Widget iframe (HTML)    │
+                  │  Unified Bridge detects  │
+                  │  host at runtime         │
+                  └─────────────────────────┘
 ```
 
 ## Features
@@ -53,7 +62,7 @@ app/mcp/chatgpt/
 ├── discovery_tools.py    # Property search, details, swipe tools
 ├── visit_tools.py        # Visit scheduling tools
 ├── pm_tools.py           # Property management tools (leases, rent, maintenance)
-├── response_formatter.py # ChatGPT-specific response formatting
+├── response_formatter.py # Response formatting for all MCP hosts
 └── validation.py         # Pydantic schemas for tool inputs
 
 chatgpt-widgets/
@@ -65,7 +74,7 @@ chatgpt-widgets/
 │   ├── types/
 │   │   └── openai.d.ts   # window.openai TypeScript definitions
 │   ├── utils/
-│   │   ├── bridge.ts     # OpenAI bridge hooks (useToolOutput, etc.)
+│   │   ├── bridge.ts     # Unified bridge hooks (works on all MCP hosts)
 │   │   └── theme.ts      # Theme colors for dark/light mode
 │   ├── components/
 │   │   ├── common/       # Reusable components (Button, Card)
@@ -119,15 +128,16 @@ npm run build:watch
    ngrok http 8000
    ```
 
-3. Test with MCP Inspector:
+3. Test with MCP Inspector (universal testing tool):
    ```bash
    npx @mcpjam/inspector --url https://your-ngrok-url.ngrok.io/mcp --oauth --verbose
    ```
 
-4. Connect to ChatGPT:
-   - Go to ChatGPT Settings → Apps & Connectors → Advanced settings
-   - Enable developer mode
-   - Add a new connector with your ngrok URL + `/mcp`
+4. Connect from your preferred client:
+   - **ChatGPT**: Settings > Apps & Connectors > Advanced, add URL + `/mcp`
+   - **Claude Desktop**: Add to `claude_desktop_config.json` with `type: "streamable-http"`
+   - **Cursor**: Add to `.cursor/mcp.json` with `transport: "streamable-http"`
+   - **VS Code Copilot**: Add to `.vscode/mcp.json` with `type: "http"`
 
 ## OAuth Compatibility
 
@@ -197,26 +207,42 @@ The MCP server supports standards-based OAuth for multi-client compatibility:
 
 ## Widget Development
 
-### Using the OpenAI Bridge
+### Using the Unified Widget Bridge
+
+The bridge (`src/utils/bridge.ts`) provides identical React hooks regardless of the host runtime. It auto-detects the host at module load — no per-widget configuration needed.
 
 ```tsx
 import { useToolOutput, useCallTool, useSendMessage } from '../utils/bridge';
 
 function MyWidget() {
-  // Get tool output data
+  // Get tool output data — works on all MCP hosts
   const data = useToolOutput<MyDataType>();
 
-  // Call other tools
+  // Call other tools — uses window.openai on ChatGPT, JSON-RPC on other hosts
   const callTool = useCallTool();
   await callTool('discovery.search', { city: 'Mumbai' });
 
-  // Send follow-up messages
+  // Send follow-up messages — adapts to host protocol
   const sendMessage = useSendMessage();
   sendMessage('Show me details for property 123');
 }
 ```
 
+**Available hooks** (all work identically across hosts):
+
+| Hook | OpenAI Host | MCP Apps Host |
+|------|-------------|---------------|
+| `useToolOutput()` | `window.openai.toolOutput` | JSON-RPC `ui/notifications/tool-result` |
+| `useToolMeta()` | `window.openai.toolResponseMetadata` | JSON-RPC `_meta` field |
+| `useWidgetState()` | `window.openai.setWidgetState()` | `localStorage` persistence |
+| `useTheme()` | `window.openai.theme` | `ui/notifications/host-context-changed` |
+| `useCallTool()` | `window.openai.callTool()` | JSON-RPC `tools/call` |
+| `useSendMessage()` | `window.openai.sendFollowUpMessage()` | JSON-RPC `ui/message` |
+| `useOpenExternal()` | `window.openai.openExternal()` | `window.open()` fallback |
+
 ### Theme Support
+
+Themes work on all MCP Apps hosts, not just ChatGPT:
 
 ```tsx
 import { useThemeColors } from '../utils/theme';
@@ -239,23 +265,52 @@ function MyComponent() {
 
 1. Build widgets: `npm run build` in `chatgpt-widgets/`
 2. Deploy backend to production
-3. Ensure CORS allows `chatgpt.com` and `chat.openai.com`
+3. Ensure CORS allows all MCP client origins (`chatgpt.com`, `chat.openai.com`, and any MCP host domains)
 4. Configure MCP endpoint at `https://api.360ghar.com/mcp`
 
-## ChatGPT Client Configuration
+## MCP Client Configuration
 
-For end users connecting to 360Ghar:
+All clients connect to the same server URL. For end users:
 
+**ChatGPT Apps**: Settings > Apps & Connectors > Advanced, URL: `https://api.360ghar.com/mcp`
+
+**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "360ghar": {
-      "transport": "http",
+      "type": "streamable-http",
       "url": "https://api.360ghar.com/mcp"
     }
   }
 }
 ```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "360ghar": {
+      "url": "https://api.360ghar.com/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+**VS Code Copilot** (`.vscode/mcp.json`):
+```json
+{
+  "servers": {
+    "360ghar": {
+      "url": "https://api.360ghar.com/mcp",
+      "type": "http"
+    }
+  }
+}
+```
+
+> For agent/admin access, use `https://api.360ghar.com/mcp-admin` as the URL.
 
 ## Security Considerations
 

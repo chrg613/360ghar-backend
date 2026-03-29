@@ -8,7 +8,7 @@ from app.schemas.booking import BookingCreate, BookingUpdate, BookingPayment, Bo
 from app.core.utils import make_tz_aware
 from typing import Optional
 import uuid
-from fastapi import HTTPException
+from app.core.exceptions import BadRequestException, PropertyNotFoundException, BookingNotFoundException, BookingConflictError
 
 async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate):
     """Create a new booking"""
@@ -21,7 +21,7 @@ async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate)
     check_out = booking_data["check_out_date"]
     nights = (check_out - check_in).days
     if nights <= 0:
-        raise HTTPException(status_code=400, detail="Invalid date range: check-out must be after check-in")
+        raise BadRequestException(detail="Invalid date range: check-out must be after check-in")
 
     # Check availability before creating the booking
     availability = await check_availability(
@@ -32,7 +32,10 @@ async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate)
         booking_data["guests"],
     )
     if not availability.get("available", False):
-        raise HTTPException(status_code=400, detail=availability.get("reason", "Property not available for these dates"))
+        reason = availability.get("reason", "Property not available for these dates")
+        if reason == "Property not found":
+            raise PropertyNotFoundException()
+        raise BookingConflictError(detail=reason)
 
     # Calculate pricing before creating the booking
     pricing = await calculate_pricing(
@@ -43,7 +46,7 @@ async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate)
         booking_data["guests"],
     )
     if isinstance(pricing, dict) and pricing.get("error"):
-        raise HTTPException(status_code=400, detail=pricing["error"]) 
+        raise BadRequestException(detail=pricing["error"])
 
     booking_data["nights"] = pricing["nights"]
     booking_data["base_amount"] = pricing["base_amount"]

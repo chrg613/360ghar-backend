@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import PropertyNotFoundException
 from app.models.bookings import Booking
 from app.models.enums import BookingStatus, PaymentStatus
 
@@ -59,6 +60,32 @@ class TestCreateBooking:
             assert result.booking_status == "pending"
             assert result.payment_status == "pending"
             assert result.booking_reference.startswith("BK")
+
+    @pytest.mark.asyncio
+    async def test_create_booking_raises_not_found_for_missing_property(
+        self,
+        db_session: AsyncSession,
+        test_user_2,
+    ):
+        """Test missing property is surfaced as not found, not booking conflict."""
+        from app.services.booking import create_booking
+        from app.schemas.booking import BookingCreate
+
+        check_in = datetime.now(timezone.utc) + timedelta(days=7)
+        check_out = check_in + timedelta(days=3)
+
+        booking_data = BookingCreate(
+            property_id=999999,
+            check_in_date=check_in,
+            check_out_date=check_out,
+            guests=2,
+            primary_guest_name="Test Guest",
+            primary_guest_phone="+919876543210",
+            primary_guest_email="guest@test.com",
+        )
+
+        with pytest.raises(PropertyNotFoundException):
+            await create_booking(db_session, test_user_2.id, booking_data)
 
     @pytest.mark.asyncio
     async def test_create_booking_invalid_dates(

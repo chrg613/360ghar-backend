@@ -11,11 +11,18 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import bleach
-from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    HotspotNotFoundException,
+    NotFoundException,
+    SceneNotFoundException,
+    TourNotFoundException,
+)
 from app.core.logging import get_logger
 from app.core.utils import utc_now
 from app.models.enums import HotspotType, TourStatus, TourVisibility
@@ -72,19 +79,13 @@ _HOTSPOT_HTML_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "tel"]
 def _ensure_tour_ownership(tour: Tour, user_id: int, action: str = "access") -> None:
     """Raise 403 if user doesn't own the tour."""
     if tour.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You don't have permission to {action} this tour",
-        )
+        raise ForbiddenException(detail=f"You don't have permission to {action} this tour")
 
 
 def _ensure_scene_ownership(scene: Scene, user_id: int, action: str = "access") -> None:
     """Raise 403 if user doesn't own the scene's tour."""
     if scene.tour.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You don't have permission to {action} this scene",
-        )
+        raise ForbiddenException(detail=f"You don't have permission to {action} this scene")
 
 
 def _extract_session_duration(event: TourAnalyticsEvent, session_starts: dict) -> Optional[float]:
@@ -169,32 +170,20 @@ def _normalize_hotspot_content(
         content = {}
 
     if not isinstance(content, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Hotspot content must be an object",
-        )
+        raise BadRequestException(detail="Hotspot content must be an object")
 
     normalized: dict = {"kind": hotspot_type.value}
 
     if hotspot_type == HotspotType.link:
         raw_url = content.get("url") or content.get("link_url")
         if not raw_url or not isinstance(raw_url, str):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Link hotspots require content.url",
-            )
+            raise BadRequestException(detail="Link hotspots require content.url")
         if not _is_safe_http_url(raw_url):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Link hotspots require a valid http(s) URL",
-            )
+            raise BadRequestException(detail="Link hotspots require a valid http(s) URL")
         normalized["url"] = raw_url
         target = content.get("target")
         if target not in {"_blank", "_self", None}:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Link hotspot content.target must be _blank or _self",
-            )
+            raise BadRequestException(detail="Link hotspot content.target must be _blank or _self")
         if target is None:
             link_new_tab = content.get("link_new_tab")
             normalized["target"] = "_self" if link_new_tab is False else "_blank"
@@ -208,15 +197,9 @@ def _normalize_hotspot_content(
     if hotspot_type == HotspotType.audio:
         audio_url = content.get("audio_url") or content.get("url")
         if not audio_url or not isinstance(audio_url, str):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Audio hotspots require content.audio_url",
-            )
+            raise BadRequestException(detail="Audio hotspots require content.audio_url")
         if not _is_safe_http_url(audio_url):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Audio hotspots require a valid http(s) URL",
-            )
+            raise BadRequestException(detail="Audio hotspots require a valid http(s) URL")
         normalized["audio_url"] = audio_url
         if "autoplay" in content:
             normalized["autoplay"] = bool(content.get("autoplay"))
@@ -239,15 +222,11 @@ def _normalize_hotspot_content(
             normalized["vimeo_id"] = vimeo_id.strip()
         elif isinstance(video_url, str) and video_url.strip():
             if not _is_safe_http_url(video_url):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Video hotspots require a valid http(s) URL",
-                )
+                raise BadRequestException(detail="Video hotspots require a valid http(s) URL")
             normalized["video_url"] = video_url.strip()
         else:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Video hotspots require content.video_url or content.youtube_id or content.vimeo_id",
+            raise BadRequestException(
+                detail="Video hotspots require content.video_url or content.youtube_id or content.vimeo_id"
             )
 
         for key in ("autoplay", "muted", "loop"):
@@ -257,10 +236,7 @@ def _normalize_hotspot_content(
         poster_url = content.get("poster_url") or content.get("poster")
         if isinstance(poster_url, str) and poster_url.strip():
             if not _is_safe_http_url(poster_url):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Video hotspot poster_url must be a valid http(s) URL",
-                )
+                raise BadRequestException(detail="Video hotspot poster_url must be a valid http(s) URL")
             normalized["poster_url"] = poster_url.strip()
 
         return normalized
@@ -276,10 +252,7 @@ def _normalize_hotspot_content(
             normalized["html"] = _sanitize_hotspot_html(html)
         if isinstance(image_url, str) and image_url.strip():
             if not _is_safe_http_url(image_url):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Info hotspot image_url must be a valid http(s) URL",
-                )
+                raise BadRequestException(detail="Info hotspot image_url must be a valid http(s) URL")
             normalized["image_url"] = image_url.strip()
 
         return normalized if len(normalized) > 1 else None
@@ -412,20 +385,16 @@ async def get_tour(
     tour = result.scalar_one_or_none()
 
     if not tour:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tour not found")
+        raise TourNotFoundException()
 
     is_owner = user_id is not None and tour.user_id == user_id
     is_publicly_accessible = tour.status == TourStatus.published and bool(tour.is_public)
 
     if not is_owner and not is_publicly_accessible:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN
-            if user_id is not None
-            else status.HTTP_404_NOT_FOUND,
-            detail="You don't have access to this tour"
-            if user_id is not None
-            else "Tour not found",
-        )
+        if user_id is not None:
+            raise ForbiddenException(detail="You don't have access to this tour")
+        else:
+            raise TourNotFoundException()
 
     return tour
 
@@ -508,9 +477,7 @@ async def publish_tour(db: AsyncSession, tour_id: str, user_id: int) -> Tour:
 
     # Check if tour has scenes
     if not tour.scenes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot publish a tour without scenes"
-        )
+        raise BadRequestException(detail="Cannot publish a tour without scenes")
 
     tour.status = TourStatus.published
     tour.published_at = utc_now()
@@ -643,13 +610,10 @@ async def get_scene(db: AsyncSession, scene_id: str, user_id: Optional[int] = No
     scene = result.scalar_one_or_none()
 
     if not scene:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+        raise SceneNotFoundException()
 
     if user_id is not None and scene.tour.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this scene",
-        )
+        raise ForbiddenException(detail="You don't have access to this scene")
 
     return scene
 
@@ -736,10 +700,7 @@ async def reorder_scenes(
 
     # Validation: Check for duplicates
     if len(scene_ids) != len(set(scene_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Duplicate scene_ids found in reorder request",
-        )
+        raise BadRequestException(detail="Duplicate scene_ids found in reorder request")
 
     # Get all existing scenes for this tour
     existing_scenes_query = select(Scene.id).where(Scene.tour_id == tour_id)
@@ -750,17 +711,15 @@ async def reorder_scenes(
     provided_scene_ids = set(scene_ids)
     invalid_scene_ids = provided_scene_ids - existing_scene_ids
     if invalid_scene_ids:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid scene_ids: {list(invalid_scene_ids)}. Scenes must exist and belong to this tour.",
+        raise BadRequestException(
+            detail=f"Invalid scene_ids: {list(invalid_scene_ids)}. Scenes must exist and belong to this tour."
         )
 
     # Validation: Check all scenes in the tour are included
     missing_scene_ids = existing_scene_ids - provided_scene_ids
     if missing_scene_ids:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Missing scene_ids: {list(missing_scene_ids)}. All tour scenes must be included in reorder request.",
+        raise BadRequestException(
+            detail=f"Missing scene_ids: {list(missing_scene_ids)}. All tour scenes must be included in reorder request."
         )
 
     # Update order_index for each scene
@@ -807,7 +766,7 @@ async def get_hotspot(db: AsyncSession, hotspot_id: str, user_id: Optional[int] 
     hotspot = result.scalar_one_or_none()
 
     if not hotspot:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hotspot not found")
+        raise HotspotNotFoundException()
 
     return hotspot
 
@@ -821,15 +780,11 @@ async def create_hotspot(
 
     if data.type == HotspotType.navigation:
         if not data.target_scene_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Navigation hotspots require target_scene_id",
-            )
+            raise BadRequestException(detail="Navigation hotspots require target_scene_id")
         target_scene = await get_scene(db, data.target_scene_id, user_id)
         if target_scene.tour_id != scene.tour_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Navigation hotspots must target a scene in the same tour",
+            raise BadRequestException(
+                detail="Navigation hotspots must target a scene in the same tour"
             )
 
     normalized_content = _normalize_hotspot_content(data.type, data.content)
@@ -884,15 +839,11 @@ async def update_hotspot(
 
     if next_type == HotspotType.navigation:
         if not next_target_scene_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Navigation hotspots require target_scene_id",
-            )
+            raise BadRequestException(detail="Navigation hotspots require target_scene_id")
         target_scene = await get_scene(db, next_target_scene_id, user_id)
         if target_scene.tour_id != scene.tour_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Navigation hotspots must target a scene in the same tour",
+            raise BadRequestException(
+                detail="Navigation hotspots must target a scene in the same tour"
             )
     else:
         next_target_scene_id = None
@@ -1490,7 +1441,7 @@ async def get_floor_plan(db: AsyncSession, floor_plan_id: str, user_id: int) -> 
     floor_plan = result.scalar_one_or_none()
 
     if not floor_plan:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Floor plan not found")
+        raise NotFoundException(detail="Floor plan not found")
 
     # Verify tour ownership
     tour = await get_tour(db, floor_plan.tour_id, user_id, include_scenes=False)

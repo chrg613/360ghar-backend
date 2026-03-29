@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BadRequestException
 from app.models.enums import VisitStatus
 
 
@@ -56,9 +57,10 @@ class TestCreateVisit:
             scheduled_date=past_date,
         )
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(BadRequestException) as exc_info:
             await create_visit(db_session, test_user.id, visit_data)
 
+        assert exc_info.value.status_code == 400
         assert "future" in str(exc_info.value).lower()
 
 

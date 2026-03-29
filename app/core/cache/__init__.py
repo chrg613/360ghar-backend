@@ -2,7 +2,7 @@
 Modular caching system with swappable backends.
 
 Usage:
-    from app.core.cache import get_cache_manager, cached, cache_response
+    from app.core.cache import get_cache_manager, cached
 
     # Access global cache manager
     cache = get_cache_manager()
@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from app.core.cache.interface import CacheBackend, CacheStats
 from app.core.cache.manager import CacheManager, CacheBackendType, NullCacheBackend
-from app.core.cache.decorators import cached, cache_response, invalidate_cache
+from app.core.cache.decorators import cached, invalidate_cache
 from app.core.cache.keys import build_cache_key, CacheKeyPatterns, generate_hash
 
 # Global cache manager instance
@@ -47,11 +47,11 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def set_cache_manager(manager: CacheManager) -> None:
+def set_cache_manager(manager: Optional[CacheManager]) -> None:
     """Set the global cache manager (for testing).
 
     Args:
-        manager: CacheManager instance to use globally
+        manager: CacheManager instance to use globally, or None to reset.
     """
     global _cache_manager
     _cache_manager = manager
@@ -139,7 +139,6 @@ __all__ = [
     "CacheStats",
     # Decorators
     "cached",
-    "cache_response",
     "invalidate_cache",
     # Keys
     "build_cache_key",

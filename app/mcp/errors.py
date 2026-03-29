@@ -84,14 +84,6 @@ class MCPResponse(BaseModel):
         return {k: v for k, v in d.items() if v is not None}
 
 
-def unauthorized_response(message: str = "Authentication required") -> Dict[str, Any]:
-    """Helper to create unauthorized response."""
-    return MCPResponse.failure(
-        code=MCPErrorCode.UNAUTHORIZED,
-        message=message
-    ).model_dump()
-
-
 def invalid_input_response(
     message: str,
     details: Optional[Dict[str, Any]] = None

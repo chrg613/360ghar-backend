@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.exceptions import BadRequestException
 from app.services.notification_config import NotificationChannel, NotificationPriority
 
 
@@ -112,9 +113,10 @@ class TestBuildMessage:
         """Test that token or topic is required."""
         from app.services.notifications import build_message
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(BadRequestException) as exc_info:
             build_message(title="Test", body="Test")
 
+        assert exc_info.value.status_code == 400
         assert "token or topic" in str(exc_info.value).lower()
 
     def test_build_message_content_available(self):

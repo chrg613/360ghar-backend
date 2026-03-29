@@ -5,6 +5,8 @@ This module provides a unified interface for different AI providers (Gemini, GLM
 enabling easy switching between providers and reuse across different AI-powered features.
 """
 
+import json
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
@@ -53,6 +55,74 @@ class AIProvider(ABC):
 
     def __init__(self, config: AIProviderConfig):
         self.config = config
+
+    def _extract_balanced_json_object(self, text: str) -> Optional[str]:
+        """Return the first balanced JSON object embedded in text."""
+        start = text.find("{")
+        while start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+
+            for index in range(start, len(text)):
+                char = text[index]
+
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif char == "\\":
+                        escape = True
+                    elif char == '"':
+                        in_string = False
+                    continue
+
+                if char == '"':
+                    in_string = True
+                elif char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return text[start : index + 1]
+
+            start = text.find("{", start + 1)
+
+        return None
+
+    def _parse_json_response(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from AI response text.
+
+        Tries, in order:
+        1. Direct ``json.loads``
+        2. Extraction from markdown code fences (```json ... ```)
+        3. The first balanced JSON object embedded in the text
+        """
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Markdown code block
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if fence_match:
+            try:
+                return json.loads(fence_match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # First balanced-brace JSON object
+        json_object = self._extract_balanced_json_object(text)
+        if json_object:
+            try:
+                return json.loads(json_object)
+            except json.JSONDecodeError:
+                pass
+
+        raise AIProviderError(
+            message="Failed to parse JSON from response",
+            provider=self.name,
+            response_body=text[:1000],
+        )
 
     @property
     @abstractmethod

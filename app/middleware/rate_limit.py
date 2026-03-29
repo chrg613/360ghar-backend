@@ -1,5 +1,5 @@
-from typing import Dict, Callable
 import time
+from typing import Callable
 from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -93,21 +93,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return f"ip:{ip}"
     
     async def check_rate_limit(self, client_id: str, path: str) -> bool:
-        """Check if request is within rate limit"""
+        """Check if request is within rate limit using CacheManager."""
         cache = get_cache_manager()
 
-        # If cache not available, use in-memory fallback
-        if not cache.is_available():
-            return await self._check_rate_limit_memory(client_id, path)
-
-        # Create cache key
         key = f"rate_limit:{self.scope}:{client_id}:{path}"
-
-        # Get current timestamp
         now = int(time.time())
         window_start = now - self.period
 
-        # Get request history from cache
+        # Get request history from cache (CacheManager handles fallback)
         history = await cache.get(key) or []
 
         # Filter requests within current window
@@ -118,35 +111,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning(f"Rate limit exceeded for {client_id} on {path}")
             return False
 
-        # Add current request
+        # Add current request and update cache
         history.append(now)
-
-        # Update cache
         await cache.set(key, history, ttl=self.period)
 
-        return True
-    
-    _memory_store: Dict[str, list] = {}
-    
-    async def _check_rate_limit_memory(self, client_id: str, path: str) -> bool:
-        """In-memory fallback for rate limiting when Redis is unavailable"""
-        key = f"{self.scope}:{client_id}:{path}"
-        now = int(time.time())
-        window_start = now - self.period
-        
-        # Clean up old entries
-        if key in self._memory_store:
-            self._memory_store[key] = [ts for ts in self._memory_store[key] if ts > window_start]
-        else:
-            self._memory_store[key] = []
-        
-        # Check limit
-        if len(self._memory_store[key]) >= self.calls:
-            logger.warning(f"Rate limit exceeded (memory) for {client_id} on {path}")
-            return False
-        
-        # Add request
-        self._memory_store[key].append(now)
         return True
 
 class EndpointRateLimiter:
