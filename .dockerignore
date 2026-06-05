@@ -1,44 +1,89 @@
+# --- VCS / CI ---
 .git
 .github
-.venv
-.env.dev
-.env.test
-.env.prod
-.env.example
+.gitignore
+.gitattributes
+
+# --- Python bytecode / caches ---
 __pycache__
 **/__pycache__
-*.pyc
+*.py[cod]
+
+# --- Test / type / lint / coverage caches ---
 .pytest_cache
 .mypy_cache
+.dmypy.json
 .ruff_cache
 .coverage
 htmlcov/
 coverage.xml
-.factory
-.agents
-.playwright-mcp
+.hypothesis/
+
+# --- Virtualenv (deps ship via the uv .venv builder layer, NOT from source) ---
+.venv
+
+# --- Build / packaging artifacts ---
+build/
+.eggs/
+*.egg-info/
+ghar360_backend.egg-info
+
+# --- Secrets / local env ---
+.env.dev
+.env.test
+.env.prod
+.env.example
+
+# --- Dev source trees not needed at runtime ---
 plans
 tests
 docs
 scripts
+tools
+populate_data
+seed_data
 supabase
 supabase-backup
-chatgpt-widgets
+
+# --- Agent / editor / assistant tooling ---
+.factory
+.agents
+.claude
+.playwright-mcp
+.vscode/
+.idea/
+AGENTS.md
+CLAUDE.md
+viral-blog-publisher.skill
+
+# --- Docs / license ---
+README.md
+LICENSE
+
+# --- Media / large artifacts / local caches ---
 *.png
 *.jpg
 *.jpeg
 digest.txt
 gitingest.txt
-ghar360_backend.egg-info
+cache/
+
+# --- OS junk ---
 .DS_Store
-AGENTS.md
-CLAUDE.md
-README.md
-LICENSE
+._*
+Thumbs.db
+
+# --- Deploy descriptors / alt-runtime configs (build inputs, not runtime) ---
 .python-version
+runtime.txt
 Procfile
 app.yaml
 wasmer.toml
 railway.toml
 docker-compose.yml
-viral-blog-publisher.skill
+Dockerfile
+.dockerignore
+
+# --- ChatGPT widgets: drop source/build tooling, but SHIP the built dist (served as MCP resources) ---
+chatgpt-widgets/*
+!chatgpt-widgets/dist

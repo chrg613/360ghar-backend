@@ -124,7 +124,7 @@ class Property(Base):
     minimum_stay_days: Mapped[int] = mapped_column(Integer, default=1)
 
     # Features
-    features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    features: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     listing_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     main_image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     virtual_tour_url: Mapped[str | None] = mapped_column(String, nullable=True)

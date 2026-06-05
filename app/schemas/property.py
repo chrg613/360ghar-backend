@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import (
     PG_FLATMATE_TYPES,
@@ -259,12 +261,34 @@ class PropertyInDB(PropertyBase):
     created_at: datetime
     updated_at: datetime | None = None
 
+    @field_validator("features", mode="before")
+    @classmethod
+    def coerce_features(cls, v: object) -> list[str] | None:
+        if isinstance(v, dict):
+            return [k for k in v if isinstance(k, str)]
+        return v  # type: ignore[return-value]
+
+    @field_validator(
+        "base_price",
+        "price_per_sqft",
+        "monthly_rent",
+        "daily_rate",
+        "security_deposit",
+        "maintenance_charges",
+        mode="before",
+    )
+    @classmethod
+    def coerce_decimal(cls, v: object) -> float | None:
+        if v is None:
+            return None
+        return float(v)  # type: ignore[arg-type]
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class Property(PropertyInDB):
     images: list[PropertyImage] | None = None
-    amenities: list[PropertyAmenityResponse] | None = None
+    amenities: list[PropertyAmenityResponse] | None = Field(None, validation_alias="property_amenities")
     distance_km: float | None = None  # For location-based searches
     liked: bool | None = None  # For swipe history - indicates if user liked this property
     vector_distance: float | None = None  # For semantic similarity scoring

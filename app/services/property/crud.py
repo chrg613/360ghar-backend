@@ -191,6 +191,8 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
             },
         )
         return PropertySchema.model_validate(property_obj)
+    except PropertyNotFoundException:
+        raise
     except Exception as e:
         logger.error("Failed to fetch property %s: %s", property_id, e, exc_info=True)
         raise
