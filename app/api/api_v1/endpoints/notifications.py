@@ -13,6 +13,7 @@ from app.api.api_v1.dependencies.auth import (
     get_current_user_optional,
 )
 from app.core.database import get_db
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.user import User as UserSchema
 from app.services.notification_config import NOTIFICATION_TYPES, NotificationCategory
 from app.services.notification_dispatcher import (
@@ -231,13 +232,12 @@ class NotificationLogEntry(BaseModel):
     created_at: str | None = None
 
 
-@router.get("/users/{user_id}", response_model=list[NotificationLogEntry])
+@router.get("/users/{user_id}", response_model=CursorPage[NotificationLogEntry])
 async def list_user_notifications(
     user_id: int,
     _: UserSchema = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
 ):
     """Return notifications sent to the specified user (by DB id)."""
     from app.models.users import User as UserModel
@@ -245,14 +245,19 @@ async def list_user_notifications(
     user = await db.get(UserModel, user_id)
     if not user or not getattr(user, "supabase_user_id", None):
         raise HTTPException(status_code=404, detail="User not found or not linked to Supabase")
-    records = await list_notifications_for_user(user.supabase_user_id, limit=limit, offset=offset)
+    records, next_payload, total = await list_notifications_for_user(
+        user.supabase_user_id,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
+    )
     # Supabase may return ints/other types for id; normalise to strings for the API
-    normalised: list[dict[str, Any]] = []
+    normalised: list[NotificationLogEntry] = []
     for rec in records:
         rec = dict(rec)
         rec["id"] = str(rec.get("id"))
-        normalised.append(rec)
-    return normalised
+        normalised.append(NotificationLogEntry(**rec))
+    return build_cursor_page(normalised, limit=page.limit, next_payload=next_payload, total=total)
 
 
 class MarketingNotification(BaseModel):

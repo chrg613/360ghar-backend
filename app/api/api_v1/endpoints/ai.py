@@ -7,6 +7,7 @@ This module provides REST API endpoints for AI-powered features:
 - Description generation
 - AI job management
 """
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.tour import (
-    AIJobListResponse,
+    AIJobBase,
     AIJobResponse,
     AIJobStatusResponse,
     ApplyHotspotSuggestions,
@@ -266,27 +268,32 @@ async def generate_tour_descriptions(
 # AI Job Management
 # ====================
 
-@router.get("/jobs", response_model=AIJobListResponse)
+@router.get("/jobs", response_model=CursorPage[AIJobBase])
 async def list_ai_jobs(
     status_filter: str | None = Query(None, alias="status", description="Filter by status"),
-    limit: int = Query(20, ge=1, le=100, description="Items to return"),
-    offset: int = Query(0, ge=0, description="Items to skip"),
+    page: CursorParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema = Depends(get_current_active_user),
 ):
     """
     List AI processing jobs for the current user.
 
-    Returns jobs with optional status filtering and pagination.
+    Returns jobs with optional status filtering and cursor pagination.
     """
-    result = await tour_ai.get_user_ai_jobs(
+    rows, next_payload, total = await tour_ai.get_user_ai_jobs(
         db=db,
         user_id=current_user.id,
         status_filter=status_filter,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return result
+    return build_cursor_page(
+        [AIJobBase.model_validate(r) for r in rows],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=AIJobStatusResponse)

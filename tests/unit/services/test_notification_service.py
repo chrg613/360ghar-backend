@@ -256,9 +256,9 @@ class TestListNotificationsForUser:
             "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
-            result = await list_notifications_for_user("user_123", limit=10)
+            rows, next_pg, total = await list_notifications_for_user("user_123", limit=10)
 
-            assert isinstance(result, list)
+            assert isinstance(rows, list)
 
 
 class TestSendToToken:

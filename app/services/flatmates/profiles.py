@@ -378,7 +378,7 @@ async def list_flatmates_notifications(db: AsyncSession, user_id: int) -> list[d
     user = await db.get(User, user_id)
     if user is None:
         raise BadRequestException(detail="User not found")
-    rows = await list_notifications_for_user(user.supabase_user_id, limit=50, offset=0)
+    rows, _next, _total = await list_notifications_for_user(user.supabase_user_id, cursor_payload={}, limit=50)
     return [_serialize_flatmate_notification(row) for row in rows]
 
 
