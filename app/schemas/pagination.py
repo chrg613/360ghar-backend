@@ -40,11 +40,11 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
     return payload
 
 
-def keyset_payload(sort_value: Any, item_id: int) -> dict[str, Any]:
+def keyset_payload(sort_value: Any, item_id: int | str) -> dict[str, Any]:
     return {"v": CURSOR_VERSION, "k": [sort_value, item_id]}
 
 
-def read_keyset(payload: dict[str, Any]) -> tuple[Any, int] | None:
+def read_keyset(payload: dict[str, Any]) -> tuple[Any, int | str] | None:
     key = payload.get("k")
     if isinstance(key, list) and len(key) == 2:
         return key[0], key[1]

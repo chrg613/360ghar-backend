@@ -411,7 +411,10 @@ async def get_faqs_public(
 ):
     """Public FAQs listing (only active FAQs, cached 6hrs)."""
     rows, next_payload, total = await get_faqs_public_cached(
-        core_service, category, page.limit, page.decoded()
+        core_service,
+        category=category,
+        limit=page.limit,
+        cursor_payload=page.decoded(),
     )
     return build_cursor_page(
         [FAQResponse.model_validate(r) for r in rows],

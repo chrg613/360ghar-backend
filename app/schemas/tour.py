@@ -466,12 +466,6 @@ class ApplyHotspotSuggestions(BaseModel):
     suggestion_ids: list[str]
 
 
-class AIJobListResponse(BaseModel):
-    """Response containing list of AI jobs."""
-    jobs: list[AIJobBase]
-    total: int
-
-
 class TourGenerationSceneInput(BaseModel):
     """Scene input for AI-driven tour generation."""
     image_url: str = Field(..., max_length=500)

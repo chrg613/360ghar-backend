@@ -209,18 +209,26 @@ async def three_pages(db_session) -> list[Page]:
 
 
 async def test_pages_cursor_paginates(admin_client: AsyncClient, three_pages) -> None:
+    # Each test runs inside its own rolled-back transaction, so only the 3 seeded
+    # pages exist here — limit=2 MUST produce has_more=True unconditionally.
     r1 = await admin_client.get("/api/v1/pages?limit=2")
     assert r1.status_code == 200, r1.text
     body1 = r1.json()
     assert set(body1) >= {"items", "next_cursor", "has_more", "limit"}
-    assert len(body1["items"]) <= 2
-    if body1["has_more"]:
-        assert body1["next_cursor"]
-        r2 = await admin_client.get(f"/api/v1/pages?limit=2&cursor={body1['next_cursor']}")
-        assert r2.status_code == 200, r2.text
-        ids1 = {item["id"] for item in body1["items"]}
-        ids2 = {item["id"] for item in r2.json()["items"]}
-        assert ids1.isdisjoint(ids2)
+    assert len(body1["items"]) == 2
+    assert body1["has_more"] is True, (
+        "Expected has_more=True: exactly 3 pages are seeded in this test's isolated "
+        "transaction and limit=2 should always leave one page on page 2."
+    )
+    assert body1["next_cursor"]
+
+    r2 = await admin_client.get(f"/api/v1/pages?limit=2&cursor={body1['next_cursor']}")
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    ids1 = {item["id"] for item in body1["items"]}
+    ids2 = {item["id"] for item in body2["items"]}
+    assert ids1.isdisjoint(ids2), "ID overlap across pages"
+    assert body2["has_more"] is False
 
 
 async def test_pages_include_total(admin_client: AsyncClient, three_pages) -> None:
@@ -304,6 +312,61 @@ async def test_faqs_public_invalid_cursor_400(guest_client: AsyncClient) -> None
     r = await guest_client.get("/api/v1/faqs/public?cursor=garbage!!!")
     assert r.status_code == 400, r.text
     assert r.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+async def test_faqs_public_cache_path_page_walk(
+    guest_client: AsyncClient, db_session
+) -> None:
+    """Cache-key regression: page 2 must differ from page 1 for the same category.
+
+    The @cached decorator on get_faqs_public_cached builds the key only from
+    kwargs.  Before Fix 1 the call was fully positional, so category/limit/cursor
+    never entered the key — every request returned the same cached page-1 payload.
+
+    NOTE: In the test environment `testing=True` disables cache initialization
+    (initialize_cache() is skipped in lifespan), so is_available() returns False
+    and the @cached decorator falls through to the real function on every call.
+    This means the bug CANNOT manifest in tests — but the test still validates the
+    correct pagination behaviour and will catch any future regression where the
+    cached path returns stale data.
+    """
+    from app.models.core import FAQ
+
+    # Seed exactly 3 active FAQs in an isolated category so limit=2 forces a
+    # second page, regardless of other data in the session.
+    category = f"cache-test-{uuid.uuid4().hex[:8]}"
+    for i in range(3):
+        faq = FAQ(
+            question=f"Cache Test Q {i}?",
+            answer=f"Cache Test A {i}",
+            category=category,
+            is_active=True,
+        )
+        db_session.add(faq)
+    await db_session.flush()
+
+    # Page 1
+    r1 = await guest_client.get(f"/api/v1/faqs/public?limit=2&category={category}")
+    assert r1.status_code == 200, r1.text
+    body1 = r1.json()
+    assert len(body1["items"]) == 2
+    assert body1["has_more"] is True, "Expected has_more=True with 3 seeded FAQs and limit=2"
+    assert body1["next_cursor"]
+
+    # Page 2 — cursor carries the offset; if the cache key is wrong, this
+    # returns the same two items as page 1 (the pre-Fix-1 bug).
+    r2 = await guest_client.get(
+        f"/api/v1/faqs/public?limit=2&category={category}&cursor={body1['next_cursor']}"
+    )
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    ids1 = {item["id"] for item in body1["items"]}
+    ids2 = {item["id"] for item in body2["items"]}
+    assert ids1.isdisjoint(ids2), (
+        "ID overlap between page 1 and page 2 — "
+        "the cache key is not varying by cursor/limit/category."
+    )
+    assert body2["has_more"] is False
 
 
 # ===========================================================================
