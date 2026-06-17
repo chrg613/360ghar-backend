@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import datetime
+
 import pytest
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.exceptions import BadRequestException
 from app.schemas.pagination import (
@@ -8,7 +11,9 @@ from app.schemas.pagination import (
     build_cursor_page,
     decode_cursor,
     encode_cursor,
+    keyset_filter,
     keyset_payload,
+    keyset_sort_value,
     offset_payload,
     read_keyset,
     read_offset,
@@ -63,3 +68,49 @@ def test_build_cursor_page_end_of_list():
     assert page["has_more"] is False
     assert page["next_cursor"] is None
     assert page["total"] == 7
+
+
+# ---------------------------------------------------------------------------
+# keyset_sort_value tests
+# ---------------------------------------------------------------------------
+
+
+def test_keyset_sort_value_datetime():
+    dt = datetime.datetime(2026, 6, 17, 12, 0, 0)
+    result = keyset_sort_value(dt)
+    assert result == dt.isoformat()
+
+
+def test_keyset_sort_value_date():
+    d = datetime.date(2026, 6, 17)
+    result = keyset_sort_value(d)
+    assert result == d.isoformat()
+
+
+def test_keyset_sort_value_str_passthrough():
+    assert keyset_sort_value("hello") == "hello"
+
+
+def test_keyset_sort_value_int_passthrough():
+    assert keyset_sort_value(42) == 42
+
+
+# ---------------------------------------------------------------------------
+# keyset_filter tests
+# ---------------------------------------------------------------------------
+
+
+def test_keyset_filter_no_cursor_returns_none():
+    from app.models.pm_leases import Lease
+
+    result = keyset_filter(Lease.created_at, Lease.id, {})
+    assert result is None
+
+
+def test_keyset_filter_with_cursor_returns_expression():
+    from app.models.pm_leases import Lease
+
+    payload = keyset_payload("2026-06-17T00:00:00", 100)
+    result = keyset_filter(Lease.created_at, Lease.id, payload, descending=True)
+    assert result is not None
+    assert isinstance(result, ColumnElement)

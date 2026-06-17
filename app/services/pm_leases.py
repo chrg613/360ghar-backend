@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,7 +12,7 @@ from app.models.enums import LeaseStatus, UserRole
 from app.models.pm_leases import Lease
 from app.models.properties import Property
 from app.models.users import User
-from app.schemas.pagination import keyset_payload, read_keyset
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.services.pm_authz import (
     assert_can_access_lease,
     assert_can_access_property,
@@ -141,10 +141,9 @@ async def list_leases(
         count_stmt = select(func.count()).select_from(stmt.subquery())
         count_total = (await db.execute(count_stmt)).scalar_one()
 
-    keyset = read_keyset(cursor_payload)
-    if keyset is not None:
-        last_sort, last_id = keyset
-        stmt = stmt.where(tuple_(Lease.created_at, Lease.id) < (last_sort, last_id))
+    predicate = keyset_filter(Lease.created_at, Lease.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
 
     stmt = stmt.order_by(Lease.created_at.desc(), Lease.id.desc()).limit(limit + 1)
     rows = list((await db.execute(stmt)).scalars().all())
@@ -153,7 +152,7 @@ async def list_leases(
     if len(rows) > limit:
         rows = rows[:limit]
         last = rows[-1]
-        next_payload = keyset_payload(last.created_at.isoformat(), last.id)
+        next_payload = keyset_payload(keyset_sort_value(last.created_at), last.id)
     return rows, next_payload, count_total
 
 

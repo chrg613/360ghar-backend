@@ -102,13 +102,15 @@ class TestListLeases:
         """Test listing leases as owner."""
         from app.services.pm_leases import list_leases
 
-        result = await list_leases(
+        rows, next_payload, total = await list_leases(
             db_session,
             actor=test_user,
             owner_id=test_user.id,
+            cursor_payload={},
+            limit=20,
         )
 
-        assert isinstance(result, list)
+        assert isinstance(rows, list)
 
 
 class TestGetLease:

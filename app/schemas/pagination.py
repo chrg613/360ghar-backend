@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import base64
+import datetime as _dt
 import json
 from typing import Any, Generic, TypeVar
 
 from fastapi import Query
 from pydantic import BaseModel
+from sqlalchemy import cast, tuple_
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.exceptions import BadRequestException
 
@@ -46,6 +49,34 @@ def read_keyset(payload: dict[str, Any]) -> tuple[Any, int] | None:
     if isinstance(key, list) and len(key) == 2:
         return key[0], key[1]
     return None
+
+
+def keyset_sort_value(value: Any) -> Any:
+    """JSON-safe representation of a sort value for cursor encoding."""
+    if isinstance(value, (_dt.date, _dt.datetime)):
+        return value.isoformat()
+    return value
+
+
+def keyset_filter(
+    sort_col: Any,
+    id_col: Any,
+    cursor_payload: dict[str, Any],
+    *,
+    descending: bool = True,
+) -> ColumnElement | None:
+    """Return a SQLAlchemy keyset predicate for the given cursor, or None if no cursor.
+
+    Casts the cursor's bound sort value to sort_col's own type so timestamp/date
+    columns compare correctly (a raw ISO string would raise an operator error).
+    """
+    keyset = read_keyset(cursor_payload)
+    if keyset is None:
+        return None
+    last_sort, last_id = keyset
+    row = tuple_(sort_col, id_col)
+    rhs = tuple_(cast(last_sort, sort_col.type), cast(last_id, id_col.type))
+    return row < rhs if descending else row > rhs
 
 
 def offset_payload(offset: int) -> dict[str, Any]:
