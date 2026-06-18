@@ -268,14 +268,13 @@ class TestGetAgentVisits:
         """Test getting paginated agent visits."""
         from app.services.visit import get_agent_visits
 
-        result = await get_agent_visits(db_session, test_agent.id, page=1, limit=10)
+        result_items, result_next, result_total = await get_agent_visits(
+            db_session, test_agent.id, cursor_payload={}, limit=10
+        )
 
-        assert "items" in result
-        assert "total" in result
-        assert "page" in result
-        assert "total_pages" in result
-        assert "has_next" in result
-        assert "has_prev" in result
+        assert isinstance(result_items, list)
+        assert result_next is None or isinstance(result_next, dict)
+        assert result_total is None
 
 
 class TestGetAllVisits:

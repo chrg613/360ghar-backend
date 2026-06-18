@@ -22,9 +22,6 @@ from app.services.agent.crud import (
     update_agent,
     update_agent_availability,
 )
-from app.services.agent.helpers import (
-    _paginate_agents,
-)
 from app.services.agent.interactions import (
     get_daily_interactions,
     get_weekly_interactions,
@@ -54,6 +51,4 @@ __all__ = [
     "get_agent_with_stats",
     "get_workload_distribution",
     "get_system_stats",
-    # Helpers
-    "_paginate_agents",
 ]

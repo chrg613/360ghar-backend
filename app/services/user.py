@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 from app.core.utils import utc_now
 from app.models.enums import AuthMethod, UserRole
 from app.models.users import User
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.user import UserUpdate
 from app.utils.validators import ValidationUtils
 
@@ -734,14 +735,14 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
 async def get_all_users(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     search_query: str | None = None,
     filter_agent_id: int | None = None,
-) -> tuple[list[User], int]:
-    """Return users with optional agent filter and search, with pagination."""
+) -> tuple[list[User], dict | None, int | None]:
+    """Return users with optional agent filter and search, keyset-paginated."""
     try:
-        offset = (page - 1) * limit
         conditions = []
         if filter_agent_id is not None:
             conditions.append(User.agent_id == filter_agent_id)
@@ -752,17 +753,27 @@ async def get_all_users(
             )
 
         stmt = select(User)
-        count_stmt = select(func.count()).select_from(User)
         if conditions:
             stmt = stmt.where(and_(*conditions))
-            count_stmt = count_stmt.where(and_(*conditions))
-        stmt = stmt.order_by(User.created_at.desc()).offset(offset).limit(limit)
+
+        count_total = None
+        if with_total:
+            count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+            count_total = count_result.scalar_one()
+
+        predicate = keyset_filter(User.created_at, User.id, cursor_payload, descending=True)
+        if predicate is not None:
+            stmt = stmt.where(predicate)
+        stmt = stmt.order_by(User.created_at.desc(), User.id.desc()).limit(limit + 1)
         result = await db.execute(stmt)
         users = list(result.scalars().all())
 
-        count_result = await db.execute(count_stmt)
-        total = count_result.scalar_one()
-        return users, total
+        next_payload = None
+        if len(users) > limit:
+            users = users[:limit]
+            next_payload = keyset_payload(keyset_sort_value(users[-1].created_at), users[-1].id)
+
+        return users, next_payload, count_total
     except Exception as e:
         logger.error("Failed to list users: %s", e)
         raise

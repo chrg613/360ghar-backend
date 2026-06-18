@@ -95,15 +95,7 @@ class TestGetAvailableAgentsEndpoint:
             "app.api.api_v1.endpoints.agents.get_available_agents_paginated",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = {
-                "items": [],
-                "total": 0,
-                "page": 1,
-                "limit": 20,
-                "total_pages": 0,
-                "has_next": False,
-                "has_prev": False,
-            }
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/agents/available/")
 
@@ -122,15 +114,7 @@ class TestGetAllAgentsEndpoint:
             "app.api.api_v1.endpoints.agents.get_all_agents_paginated",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = {
-                "items": [],
-                "total": 0,
-                "page": 1,
-                "limit": 20,
-                "total_pages": 0,
-                "has_next": False,
-                "has_prev": False,
-            }
+            mock_get.return_value = ([], None, None)
 
             response = await admin_authenticated_client.get("/api/v1/agents/")
 
@@ -301,15 +285,7 @@ class TestGetAgentsByTypeEndpoint:
             "app.api.api_v1.endpoints.agents.get_agents_by_type_paginated",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = {
-                "items": [],
-                "total": 0,
-                "page": 1,
-                "limit": 20,
-                "total_pages": 0,
-                "has_next": False,
-                "has_prev": False,
-            }
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/agents/types/general")
 

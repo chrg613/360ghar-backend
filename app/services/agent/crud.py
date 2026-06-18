@@ -1,4 +1,4 @@
-from typing import Any
+from __future__ import annotations
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,7 @@ from app.schemas.agent import (
     AgentCreate,
     AgentUpdate,
 )
-from app.services.agent.helpers import _paginate_agents
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 
 logger = get_logger(__name__)
 
@@ -44,50 +44,127 @@ async def get_available_agents(db: AsyncSession) -> list[AgentSchema]:
 async def get_available_agents_paginated(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     agent_type: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[list[Agent], dict | None, int | None]:
     """Paginated available agents, optionally filtered by type."""
     stmt = select(Agent).where(and_(Agent.is_active, Agent.is_available))
     if agent_type:
         stmt = stmt.where(Agent.agent_type == agent_type)
-    stmt = stmt.order_by(Agent.id.desc())
-    return await _paginate_agents(db, stmt, page, limit)
+
+    count_total = None
+    if with_total:
+        count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Agent.created_at, Agent.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Agent.created_at.desc(), Agent.id.desc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].created_at), rows[-1].id)
+
+    return rows, next_payload, count_total
+
 
 async def get_agents_by_type_paginated(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     agent_type: str,
-) -> dict[str, Any]:
-    stmt = select(Agent).where(and_(Agent.is_active, Agent.agent_type == agent_type)).order_by(Agent.id.desc())
-    return await _paginate_agents(db, stmt, page, limit)
+) -> tuple[list[Agent], dict | None, int | None]:
+    stmt = select(Agent).where(and_(Agent.is_active, Agent.agent_type == agent_type))
+
+    count_total = None
+    if with_total:
+        count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Agent.created_at, Agent.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Agent.created_at.desc(), Agent.id.desc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].created_at), rows[-1].id)
+
+    return rows, next_payload, count_total
+
 
 async def get_agents_by_specialization_paginated(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     specialization: str,
-) -> dict[str, Any]:
+) -> tuple[list[Agent], dict | None, int | None]:
     # We don't currently track specialization in DB; return active agents paginated
-    stmt = select(Agent).where(Agent.is_active).order_by(Agent.id.desc())
-    return await _paginate_agents(db, stmt, page, limit)
+    stmt = select(Agent).where(Agent.is_active)
+
+    count_total = None
+    if with_total:
+        count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Agent.created_at, Agent.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Agent.created_at.desc(), Agent.id.desc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].created_at), rows[-1].id)
+
+    return rows, next_payload, count_total
+
 
 async def get_all_agents_paginated(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     include_inactive: bool = False,
-) -> dict[str, Any]:
+) -> tuple[list[Agent], dict | None, int | None]:
     stmt = select(Agent)
     if not include_inactive:
         stmt = stmt.where(Agent.is_active)
-    stmt = stmt.order_by(Agent.id.desc())
-    return await _paginate_agents(db, stmt, page, limit)
+
+    count_total = None
+    if with_total:
+        count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Agent.created_at, Agent.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Agent.created_at.desc(), Agent.id.desc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].created_at), rows[-1].id)
+
+    return rows, next_payload, count_total
 
 async def get_agent_by_id(db: AsyncSession, agent_id: int) -> AgentSchema | None:
     """Get a specific agent by ID"""

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select
@@ -10,6 +12,7 @@ from app.models.enums import ConversationStatus, UserMatchStatus, VisitContext, 
 from app.models.properties import Property, Visit
 from app.models.social import UserConversation, UserMatch
 from app.models.users import User
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.visit import Visit as VisitSchema
 from app.schemas.visit import VisitCreate, VisitUpdate
 
@@ -344,42 +347,40 @@ async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, 
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
-async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit: int = 20):
-    """Get visits handled by a specific agent (paginated)."""
-    offset = (page - 1) * limit
-
-    # Page data
+async def get_agent_visits(
+    db: AsyncSession,
+    agent_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list[VisitSchema], dict | None, int | None]:
+    """Get visits handled by a specific agent (keyset-paginated)."""
     stmt = (
         select(Visit)
         .options(*_visit_load_options())
         .where(Visit.agent_id == agent_id)
-        .order_by(Visit.scheduled_date.desc())
-        .offset(offset)
-        .limit(limit)
     )
+
+    count_total = None
+    if with_total:
+        count_stmt = select(func.count()).where(Visit.agent_id == agent_id)
+        count_result = await db.execute(count_stmt)
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
     result = await db.execute(stmt)
-    rows = result.scalars().all()
-    # Convert to Pydantic models to ensure JSON serialization with generic PaginatedResponse
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+
     items = [VisitSchema.model_validate(r, from_attributes=True) for r in rows]
-
-    # Total count
-    total_stmt = select(func.count(Visit.id)).where(Visit.agent_id == agent_id)
-    total_result = await db.execute(total_stmt)
-    total = int(total_result.scalar() or 0)
-
-    total_pages = (total + limit - 1) // limit if limit else 1
-    has_next = page < total_pages
-    has_prev = page > 1 and total > 0
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": total_pages,
-        "has_next": has_next,
-        "has_prev": has_prev,
-    }
+    return items, next_payload, count_total
 
 async def mark_visit_completed(db: AsyncSession, visit_id: int, notes: str | None = None, feedback: str | None = None):
     """Mark a visit as completed"""

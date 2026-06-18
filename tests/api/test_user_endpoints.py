@@ -310,7 +310,7 @@ class TestListUsersEndpoint:
             "app.api.api_v1.endpoints.users.get_all_users",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = ([], 0)
+            mock_list.return_value = ([], None, None)
 
             response = await admin_authenticated_client.get("/api/v1/users/")
 

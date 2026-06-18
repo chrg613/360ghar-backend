@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +17,9 @@ from app.schemas.common import (
     AssignAgentPayload,
     MessageResponse,
     NotificationSettings,
-    PaginatedResponse,
     PrivacySettings,
 )
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.user import LocationUpdate, PhoneUpdate, UserPreferences, UserUpdate
 from app.schemas.user import User as UserSchema
 from app.services.agent import assign_agent_to_user
@@ -352,10 +354,9 @@ async def update_privacy_compat(
 
 
 # Admin/Agent management endpoints
-@router.get("", response_model=PaginatedResponse)
+@router.get("", response_model=CursorPage[UserSchema])
 async def list_users(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     q: str | None = Query(None, description="Search by name/email/phone"),
     agent_id: int | None = Query(None, description="Filter by agent id (admin only)"),
     current_user: User = Depends(get_current_active_user),
@@ -370,32 +371,24 @@ async def list_users(
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
             # Agents without linked agent profile manage nobody
-            return {
-                "items": [],
-                "total": 0,
-                "page": page,
-                "limit": limit,
-                "total_pages": 0,
-                "has_next": False,
-                "has_prev": False,
-            }
+            return build_cursor_page([], limit=page.limit, next_payload=None, total=None)
     else:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    users, total = await get_all_users(
-        db, page=page, limit=limit, search_query=q, filter_agent_id=effective_agent_id
+    users, next_payload, total = await get_all_users(
+        db,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
+        search_query=q,
+        filter_agent_id=effective_agent_id,
     )
-    items = [UserSchema.model_validate(u) for u in users]
-    total_pages = (total + limit - 1) // limit
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": total_pages,
-        "has_next": page < total_pages,
-        "has_prev": page > 1,
-    }
+    return build_cursor_page(
+        [UserSchema.model_validate(u) for u in users],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.get("/{user_id}", response_model=UserSchema)

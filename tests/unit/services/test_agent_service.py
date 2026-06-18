@@ -318,22 +318,24 @@ class TestAgentPagination:
         """Test paginated agent listing."""
         from app.services.agent import get_all_agents_paginated
 
-        result = await get_all_agents_paginated(db_session, page=1, limit=10)
+        rows, next_payload, count_total = await get_all_agents_paginated(
+            db_session, cursor_payload={}, limit=10
+        )
 
-        assert "items" in result
-        assert "total" in result
-        assert "page" in result
-        assert "has_next" in result
-        assert "has_prev" in result
+        assert isinstance(rows, list)
+        assert next_payload is None or isinstance(next_payload, dict)
+        assert count_total is None
 
     @pytest.mark.asyncio
     async def test_get_available_agents_paginated(self, db_session: AsyncSession, test_agents):
         """Test paginated available agents."""
         from app.services.agent import get_available_agents_paginated
 
-        result = await get_available_agents_paginated(db_session, page=1, limit=10)
+        rows, next_payload, count_total = await get_available_agents_paginated(
+            db_session, cursor_payload={}, limit=10
+        )
 
-        assert "items" in result
-        for agent in result["items"]:
+        assert isinstance(rows, list)
+        for agent in rows:
             assert agent.is_active is True
             assert agent.is_available is True
