@@ -192,7 +192,7 @@ async def get_unified_properties_optimized(
                     ]
                     # Return as 3-tuple: (items, next_payload, total)
                     cached_total = cached.get("total")
-                    cached_has_more = len(cached_items) >= limit
+                    cached_has_more = bool(cached.get("has_more", False))
                     next_p = offset_payload(limit) if cached_has_more else None
                     return cached_items[:limit], next_p, cached_total
                 except Exception as cache_exc:  # noqa: BLE001
@@ -688,6 +688,7 @@ async def get_unified_properties_optimized(
                 cache_payload = {
                     "items": [p.model_dump(mode="json") for p in property_list],
                     "total": count_total,
+                    "has_more": next_payload is not None,
                 }
                 await PropertyCacheManager.cache_properties(
                     cache_filters,
