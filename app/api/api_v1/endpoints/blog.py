@@ -1,10 +1,10 @@
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
-from app.config import settings
-from app.core.cache import CacheKeyPatterns, cached, invalidate_cache
+from app.core.cache import CacheKeyPatterns, invalidate_cache
 from app.core.database import get_db
 from app.core.db_resilience import extract_db_error_code, is_transient_db_error
 from app.core.exceptions import ServiceUnavailableException
@@ -13,20 +13,18 @@ from app.models.enums import UserRole
 from app.schemas.blog import (
     BlogCategory,
     BlogCategoryCreate,
-    BlogCategoryListResponse,
     BlogCategoryUpdate,
     BlogGenerateBulkRequest,
     BlogGenerateFromTopicRequest,
     BlogGenerationResult,
     BlogPost,
     BlogPostCreate,
-    BlogPostListResponse,
     BlogPostUpdate,
     BlogTag,
     BlogTagCreate,
-    BlogTagListResponse,
     BlogTagUpdate,
 )
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.user import User as UserSchema
 from app.services.blog import (
     create_blog_post,
@@ -52,32 +50,6 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-# Cached helper functions for reference data
-@cached("blog:posts", ttl=settings.CACHE_TTL_BLOG_POSTS)
-async def list_posts_cached(
-    db: AsyncSession,
-    q: str | None,
-    categories: list[str] | None,
-    tags: list[str] | None,
-    page: int,
-    limit: int,
-):
-    """Cached version of list_blog_posts for public (non-admin) traffic."""
-    return await list_blog_posts(db, q=q, categories=categories, tags=tags, page=page, limit=limit, include_inactive=False)
-
-
-@cached("blog:categories", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
-async def get_categories_cached(db: AsyncSession, page: int, limit: int):
-    """Cached version of list_categories."""
-    return await list_categories(db, page, limit)
-
-
-@cached("blog:tags", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
-async def get_tags_cached(db: AsyncSession, page: int, limit: int):
-    """Cached version of list_tags."""
-    return await list_tags(db, page, limit)
-
-
 @router.post("/posts", response_model=BlogPost)
 @invalidate_cache([CacheKeyPatterns.BLOG_POSTS])
 async def create_post(
@@ -95,50 +67,34 @@ async def create_post(
         raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from None
 
 
-@router.get("/posts", response_model=BlogPostListResponse)
+@router.get("/posts", response_model=CursorPage[BlogPost])
 async def list_posts(
     q: str | None = Query(None, description="Search query across title and content"),
     categories: list[str] | None = Query(None, description="Filter by category slugs or names"),
     tags: list[str] | None = Query(None, description="Filter by tag slugs or names"),
     keywords: list[str] | None = Query(None, description="Alias for tags"),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: UserSchema | None = Depends(get_current_user_optional),
 ):
-    """List blog posts with filters for categories, tags, and text search."""
+    """List blog posts with cursor pagination, filters for categories, tags, and text search."""
     try:
         all_tags = (tags or []) + (keywords or [])
         is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
-        if is_admin:
-            items, total = await list_blog_posts(
-                db,
-                q=q,
-                categories=categories,
-                tags=all_tags,
-                page=page,
-                limit=limit,
-                include_inactive=True,
-            )
-        else:
-            items, total = await list_posts_cached(
-                db,
-                q=q,
-                categories=categories,
-                tags=all_tags,
-                page=page,
-                limit=limit,
-            )
-        total_pages = (total + limit - 1) // limit
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "total_pages": total_pages,
-            "has_next": page < total_pages,
-            "has_prev": page > 1,
-        }
+        cursor_payload = page.decoded()
+        items, next_payload, count_total = await list_blog_posts(
+            db,
+            q=q,
+            categories=categories,
+            tags=all_tags,
+            cursor_payload=cursor_payload,
+            limit=page.limit,
+            with_total=page.include_total,
+            include_inactive=is_admin,
+        )
+        return build_cursor_page(items, limit=page.limit, next_payload=next_payload, total=count_total)
+    except HTTPException:
+        raise
     except Exception as e:
         if is_transient_db_error(e):
             error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
@@ -278,26 +234,24 @@ async def create_category_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from None
 
 
-@router.get("/categories", response_model=BlogCategoryListResponse)
+@router.get("/categories", response_model=CursorPage[BlogCategory])
 async def list_categories_endpoint(
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    page: CursorParams = Depends(),
     db: AsyncSession = Depends(get_db),
     _current_user: UserSchema | None = Depends(get_current_user_optional),
 ):
-    """List all blog categories with pagination. Public endpoint (cached 6hrs)."""
+    """List all blog categories with cursor pagination. Public endpoint."""
     try:
-        categories, total = await get_categories_cached(db, page, limit)
-        total_pages = (total + limit - 1) // limit
-        return {
-            "items": categories,
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "total_pages": total_pages,
-            "has_next": page < total_pages,
-            "has_prev": page > 1,
-        }
+        cursor_payload = page.decoded()
+        categories, next_payload, count_total = await list_categories(
+            db,
+            cursor_payload=cursor_payload,
+            limit=page.limit,
+            with_total=page.include_total,
+        )
+        return build_cursor_page(categories, limit=page.limit, next_payload=next_payload, total=count_total)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error in list_categories_endpoint: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from None
@@ -370,26 +324,24 @@ async def create_tag_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from None
 
 
-@router.get("/tags", response_model=BlogTagListResponse)
+@router.get("/tags", response_model=CursorPage[BlogTag])
 async def list_tags_endpoint(
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    page: CursorParams = Depends(),
     db: AsyncSession = Depends(get_db),
     _current_user: UserSchema | None = Depends(get_current_user_optional),
 ):
-    """List all blog tags with pagination. Public endpoint (cached 6hrs)."""
+    """List all blog tags with cursor pagination. Public endpoint."""
     try:
-        tags, total = await get_tags_cached(db, page, limit)
-        total_pages = (total + limit - 1) // limit
-        return {
-            "items": tags,
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "total_pages": total_pages,
-            "has_next": page < total_pages,
-            "has_prev": page > 1,
-        }
+        cursor_payload = page.decoded()
+        tags, next_payload, count_total = await list_tags(
+            db,
+            cursor_payload=cursor_payload,
+            limit=page.limit,
+            with_total=page.include_total,
+        )
+        return build_cursor_page(tags, limit=page.limit, next_payload=next_payload, total=count_total)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error in list_tags_endpoint: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from None

@@ -19,14 +19,14 @@ class TestBlogPostEndpoints:
             "app.api.api_v1.endpoints.blog.list_blog_posts",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = ([], 0)
+            mock_list.return_value = ([], None, None)
 
             response = await client.get("/api/v1/blog/posts")
 
             assert response.status_code == 200
             data = response.json()
             assert "items" in data
-            assert "total" in data
+            assert "has_more" in data
 
     @pytest.mark.asyncio
     async def test_list_blog_posts_with_filters(self, client: AsyncClient):
@@ -35,14 +35,13 @@ class TestBlogPostEndpoints:
             "app.api.api_v1.endpoints.blog.list_blog_posts",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = ([], 0)
+            mock_list.return_value = ([], None, None)
 
             response = await client.get(
                 "/api/v1/blog/posts",
                 params={
                     "q": "real estate",
                     "categories": ["buying-guide"],
-                    "page": 1,
                     "limit": 10,
                 },
             )
@@ -108,10 +107,10 @@ class TestBlogCategoryEndpoints:
     async def test_list_categories(self, client: AsyncClient):
         """Test listing blog categories."""
         with patch(
-            "app.api.api_v1.endpoints.blog.get_categories_cached",
+            "app.api.api_v1.endpoints.blog.list_categories",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = ([], 0)
+            mock_list.return_value = ([], None, None)
 
             response = await client.get("/api/v1/blog/categories")
 
@@ -138,10 +137,10 @@ class TestBlogTagEndpoints:
     async def test_list_tags(self, client: AsyncClient):
         """Test listing blog tags."""
         with patch(
-            "app.api.api_v1.endpoints.blog.get_tags_cached",
+            "app.api.api_v1.endpoints.blog.list_tags",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = ([], 0)
+            mock_list.return_value = ([], None, None)
 
             response = await client.get("/api/v1/blog/tags")
 

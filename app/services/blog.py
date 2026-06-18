@@ -21,6 +21,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.models.blogs import BlogCategory, BlogPost, BlogPostCategory, BlogPostTag, BlogTag
 from app.models.enums import UserRole
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.utils.validators import ValidationUtils
 
 if TYPE_CHECKING:
@@ -282,10 +283,11 @@ async def list_blog_posts(
     q: str | None,
     categories: list[str] | None,
     tags: list[str] | None,
-    page: int,
-    limit: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
     include_inactive: bool = False,
-) -> tuple[list[BlogPostSchema], int]:
+) -> tuple[list[BlogPostSchema], dict | None, int | None]:
     from app.schemas.blog import BlogPost as BlogPostSchema
 
     query = select(BlogPost).options(selectinload(BlogPost.categories), selectinload(BlogPost.tags))
@@ -338,24 +340,37 @@ async def list_blog_posts(
         query = query.where(and_(*conditions))
         count_query = count_query.where(and_(*conditions))
 
-    query = query.order_by(BlogPost.created_at.desc()).offset((page - 1) * limit).limit(limit)
+    # Count BEFORE applying keyset predicate (count the full filtered set)
+    count_total: int | None = None
+    if with_total:
+        count_total = (
+            await execute_with_transient_retry(
+                db,
+                lambda: db.execute(count_query),
+                operation_name="blog_posts_count",
+            )
+        ).scalar_one() or 0
+
+    # Apply keyset predicate for cursor-based pagination
+    predicate = keyset_filter(BlogPost.created_at, BlogPost.id, cursor_payload, descending=True)
+    if predicate is not None:
+        query = query.where(predicate)
+
+    query = query.order_by(BlogPost.created_at.desc(), BlogPost.id.desc()).limit(limit + 1)
 
     result = await execute_with_transient_retry(
         db,
         lambda: db.execute(query),
         operation_name="blog_posts_query",
     )
-    items = result.scalars().all()
+    rows = list(result.scalars().all())
 
-    total = (
-        await execute_with_transient_retry(
-            db,
-            lambda: db.execute(count_query),
-            operation_name="blog_posts_count",
-        )
-    ).scalar() or 0
+    next_payload: dict | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].created_at), rows[-1].id)
 
-    return [BlogPostSchema.model_validate(i) for i in items], int(total)
+    return [BlogPostSchema.model_validate(i) for i in rows], next_payload, count_total
 
 
 # Category CRUD operations
@@ -394,16 +409,33 @@ async def get_category(db: AsyncSession, identifier: str) -> BlogCategory | None
     return result.scalar_one_or_none()
 
 
-async def list_categories(db: AsyncSession, page: int = 1, limit: int = 100) -> tuple[list[BlogCategory], int]:
-    """List all categories with pagination."""
-    count_stmt = select(func.count(BlogCategory.id))
-    total = (await db.execute(count_stmt)).scalar() or 0
+async def list_categories(
+    db: AsyncSession,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list[BlogCategory], dict | None, int | None]:
+    """List all categories with keyset cursor pagination (ASC name order)."""
+    count_total: int | None = None
+    if with_total:
+        count_stmt = select(func.count(BlogCategory.id))
+        count_total = (await db.execute(count_stmt)).scalar_one() or 0
 
-    stmt = select(BlogCategory).order_by(BlogCategory.name).offset((page - 1) * limit).limit(limit)
+    stmt = select(BlogCategory)
+    predicate = keyset_filter(BlogCategory.name, BlogCategory.id, cursor_payload, descending=False)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(BlogCategory.name.asc(), BlogCategory.id.asc()).limit(limit + 1)
+
     result = await db.execute(stmt)
-    categories = result.scalars().all()
+    rows = list(result.scalars().all())
 
-    return list(categories), int(total)
+    next_payload: dict | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].name), rows[-1].id)
+
+    return rows, next_payload, count_total
 
 
 async def update_category(db: AsyncSession, identifier: str, name: str | None = None, description: str | None = None) -> BlogCategory:
@@ -484,16 +516,33 @@ async def get_tag(db: AsyncSession, identifier: str) -> BlogTag | None:
     return result.scalar_one_or_none()
 
 
-async def list_tags(db: AsyncSession, page: int = 1, limit: int = 100) -> tuple[list[BlogTag], int]:
-    """List all tags with pagination."""
-    count_stmt = select(func.count(BlogTag.id))
-    total = (await db.execute(count_stmt)).scalar() or 0
+async def list_tags(
+    db: AsyncSession,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list[BlogTag], dict | None, int | None]:
+    """List all tags with keyset cursor pagination (ASC name order)."""
+    count_total: int | None = None
+    if with_total:
+        count_stmt = select(func.count(BlogTag.id))
+        count_total = (await db.execute(count_stmt)).scalar_one() or 0
 
-    stmt = select(BlogTag).order_by(BlogTag.name).offset((page - 1) * limit).limit(limit)
+    stmt = select(BlogTag)
+    predicate = keyset_filter(BlogTag.name, BlogTag.id, cursor_payload, descending=False)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(BlogTag.name.asc(), BlogTag.id.asc()).limit(limit + 1)
+
     result = await db.execute(stmt)
-    tags = result.scalars().all()
+    rows = list(result.scalars().all())
 
-    return list(tags), int(total)
+    next_payload: dict | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].name), rows[-1].id)
+
+    return rows, next_payload, count_total
 
 
 async def update_tag(db: AsyncSession, identifier: str, name: str) -> BlogTag:

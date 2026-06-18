@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,15 +46,6 @@ class BlogCategory(BlogCategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class BlogCategoryListResponse(BaseModel):
-    items: list[BlogCategory]
-    total: int
-    page: int
-    limit: int
-    total_pages: int
-    has_next: bool
-    has_prev: bool
-
 
 class BlogTagBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Tag name")
@@ -74,15 +67,6 @@ class BlogTag(BlogTagBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-
-class BlogTagListResponse(BaseModel):
-    items: list[BlogTag]
-    total: int
-    page: int
-    limit: int
-    total_pages: int
-    has_next: bool
-    has_prev: bool
 
 
 class BlogPostBase(BaseModel):
@@ -157,16 +141,6 @@ class BlogPost(BlogPostInDB):
     tags: list[BlogTag] | None = None  # type: ignore[assignment]
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class BlogPostListResponse(BaseModel):
-    items: list[BlogPost]
-    total: int
-    page: int
-    limit: int
-    total_pages: int
-    has_next: bool
-    has_prev: bool
 
 
 # AI generation schemas
