@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -29,6 +29,7 @@ from app.models.properties import Amenity, Property, PropertyAmenity, PropertyIm
 from app.models.users import User as UserModel
 from app.repositories.property_repository import PropertyRepository
 from app.schemas.amenity import Amenity as AmenitySchema
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.property import Property as PropertySchema
 from app.schemas.property import PropertyCreate, PropertyUpdate
 from app.schemas.user import User as UserSchema
@@ -331,8 +332,27 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
         raise
 
 
-async def list_user_properties(db: AsyncSession, owner_id: int) -> list[PropertySchema]:
+async def list_user_properties(
+    db: AsyncSession,
+    owner_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    *,
+    with_total: bool = False,
+) -> tuple[list[PropertySchema], dict | None, int | None]:
     """List properties owned by a specific user (auth enforced by caller)."""
+    count_total: int | None = None
+    base_stmt = (
+        select(Property)
+        .where(Property.owner_id == owner_id)
+    )
+    if with_total:
+        count_result = await db.execute(
+            select(func.count()).select_from(base_stmt.subquery())
+        )
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Property.created_at, Property.id, cursor_payload, descending=True)
     stmt = (
         select(Property)
         .options(
@@ -340,17 +360,28 @@ async def list_user_properties(db: AsyncSession, owner_id: int) -> list[Property
             selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
         )
         .where(Property.owner_id == owner_id)
-        .order_by(Property.created_at.desc())
     )
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Property.created_at.desc(), Property.id.desc()).limit(limit + 1)
+
     res = await db.execute(stmt)
-    properties = res.scalars().all()
+    properties = list(res.scalars().all())
     paused_count = 0
     for property_obj in properties:
         if apply_expired_move_in_pause(property_obj):
             paused_count += 1
     if paused_count:
         await db.flush()
-    return [PropertySchema.model_validate(p) for p in properties]
+
+    next_payload: dict | None = None
+    if len(properties) > limit:
+        properties = properties[:limit]
+        last = properties[-1]
+        next_payload = keyset_payload(keyset_sort_value(last.created_at), last.id)
+
+    schemas = [PropertySchema.model_validate(p) for p in properties]
+    return schemas, next_payload, count_total
 
 
 async def update_property(

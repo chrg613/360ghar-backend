@@ -223,7 +223,8 @@ async def get_my_properties(
     db: AsyncSession = Depends(get_db),
 ):
     """List properties owned by the current user (requires authentication)."""
-    return await list_user_properties(db, owner_id=current_user.id)
+    rows, _next, _total = await list_user_properties(db, owner_id=current_user.id, cursor_payload={}, limit=20)
+    return rows
 
 
 @router.get("", response_model=UnifiedPropertyResponse)
