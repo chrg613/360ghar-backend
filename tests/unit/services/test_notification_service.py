@@ -239,6 +239,43 @@ class TestRegisterDeviceToken:
 
             assert result["ok"] is True
 
+    @pytest.mark.asyncio
+    async def test_register_existing_device_upserts(self, mock_supabase_client):
+        """Re-registering an existing token must upsert, not raise 23505."""
+        from app.services.notifications import register_device_token
+
+        with patch(
+            "app.services.notifications.helpers.get_supabase_service_client",
+            return_value=mock_supabase_client,
+        ):
+            result = await register_device_token(
+                token="existing_device_token",
+                platform="ios",
+                user_id="user_456",
+            )
+
+            assert result["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_register_calls_upsert_with_on_conflict(self, mock_supabase_client):
+        """Regression guard: upsert must be invoked with on_conflict='token'."""
+        from app.services.notifications import register_device_token
+
+        with patch(
+            "app.services.notifications.helpers.get_supabase_service_client",
+            return_value=mock_supabase_client,
+        ):
+            await register_device_token(
+                token="race_token",
+                platform="android",
+                user_id="user_789",
+            )
+
+            upsert_mock = mock_supabase_client.table.return_value.upsert
+            upsert_mock.assert_called_once()
+            kwargs = upsert_mock.call_args.kwargs
+            assert kwargs.get("on_conflict") == "token"
+
 
 class TestListNotificationsForUser:
     """Tests for list_notifications_for_user function."""
