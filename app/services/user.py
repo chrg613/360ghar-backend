@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 from app.core.utils import utc_now
 from app.models.enums import AuthMethod, UserRole
 from app.models.users import User
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.user import UserUpdate
 from app.utils.validators import ValidationUtils
 
@@ -734,14 +735,14 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
 async def get_all_users(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     search_query: str | None = None,
     filter_agent_id: int | None = None,
-) -> tuple[list[User], int]:
-    """Return users with optional agent filter and search, with pagination."""
+) -> tuple[list[User], dict | None, int | None]:
+    """Return users with optional agent filter and search, keyset-paginated."""
     try:
-        offset = (page - 1) * limit
         conditions = []
         if filter_agent_id is not None:
             conditions.append(User.agent_id == filter_agent_id)
@@ -752,17 +753,27 @@ async def get_all_users(
             )
 
         stmt = select(User)
-        count_stmt = select(func.count()).select_from(User)
         if conditions:
             stmt = stmt.where(and_(*conditions))
-            count_stmt = count_stmt.where(and_(*conditions))
-        stmt = stmt.order_by(User.created_at.desc()).offset(offset).limit(limit)
+
+        count_total = None
+        if with_total:
+            count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+            count_total = count_result.scalar_one()
+
+        predicate = keyset_filter(User.created_at, User.id, cursor_payload, descending=True)
+        if predicate is not None:
+            stmt = stmt.where(predicate)
+        stmt = stmt.order_by(User.created_at.desc(), User.id.desc()).limit(limit + 1)
         result = await db.execute(stmt)
         users = list(result.scalars().all())
 
-        count_result = await db.execute(count_stmt)
-        total = count_result.scalar_one()
-        return users, total
+        next_payload = None
+        if len(users) > limit:
+            users = users[:limit]
+            next_payload = keyset_payload(keyset_sort_value(users[-1].created_at), users[-1].id)
+
+        return users, next_payload, count_total
     except Exception as e:
         logger.error("Failed to list users: %s", e)
         raise
@@ -783,23 +794,31 @@ async def update_user(
         update_data = user_update.model_dump(exclude_unset=True)
         logger.debug("Updating user %s with fields: %s", user_id, list(update_data.keys()))
 
-        # RBAC: if an actor is provided and actor is an agent updating other users,
-        # restrict to safe fields only
-        if actor is not None and actor.role == UserRole.agent.value and actor.id != user_id:
-            # Ensure the agent is assigned to this user
-            if actor.agent_id is None or user.agent_id != actor.agent_id:
-                raise ForbiddenException(detail="Agent not authorized to update this user")
-            allowed_fields = {
-                "email",
-                "full_name",
-                "phone",
-                "profile_image_url",
-                "preferences",
-                "notification_settings",
-                "privacy_settings",
-            }
-            update_data = {k: v for k, v in update_data.items() if k in allowed_fields}
-            logger.debug("Agent update filtered fields: %s", list(update_data.keys()))
+        # RBAC: enforce role-based authorization on the target user.
+        #  - admins can update any user
+        #  - agents can update a limited field set for users assigned to them
+        #  - all other roles (regular users) can only update their own profile
+        if actor is not None and actor.role != UserRole.admin.value:
+            if actor.role == UserRole.agent.value and actor.id != user_id:
+                # Ensure the agent is assigned to this user
+                if actor.agent_id is None or user.agent_id != actor.agent_id:
+                    raise ForbiddenException(detail="Agent not authorized to update this user")
+                allowed_fields = {
+                    "email",
+                    "full_name",
+                    "phone",
+                    "profile_image_url",
+                    "preferences",
+                    "notification_settings",
+                    "privacy_settings",
+                }
+                update_data = {k: v for k, v in update_data.items() if k in allowed_fields}
+                logger.debug("Agent update filtered fields: %s", list(update_data.keys()))
+            elif actor.id != user_id:
+                # Regular users (and any non-admin, non-agent role) can only
+                # update their own profile. Without this check, any authenticated
+                # user could mutate another user's record by knowing the user_id.
+                raise ForbiddenException(detail="Not authorized to update this user")
         # Admins can update any fields; end-users can update their own profile via API
 
         # Handle email update (no uniqueness validation needed since emails are now non-unique)

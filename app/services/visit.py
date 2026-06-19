@@ -1,17 +1,23 @@
-from datetime import datetime, timezone
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from app.core.exceptions import BadRequestException
-from app.core.utils import make_tz_aware
+from app.config import settings
+from app.core.exceptions import BadRequestException, ConflictException
+from app.core.logging import get_logger
 from app.models.enums import ConversationStatus, UserMatchStatus, VisitContext, VisitStatus
 from app.models.properties import Property, Visit
 from app.models.social import UserConversation, UserMatch
 from app.models.users import User
+from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.visit import Visit as VisitSchema
 from app.schemas.visit import VisitCreate, VisitUpdate
+
+logger = get_logger(__name__)
 
 
 def _visit_load_options():
@@ -105,6 +111,56 @@ async def _validate_flatmate_visit_context(
     raise BadRequestException(detail="Flatmate meeting requires an active conversation or match")
 
 
+async def _ensure_no_visit_conflict(
+    db: AsyncSession,
+    user_id: int,
+    property_id: int,
+    scheduled_date: datetime,
+) -> None:
+    """Raise ConflictException if the user already has an active visit overlapping
+    the requested window **for the same property**.
+
+    The Visit model has no explicit duration column, so each visit is treated as
+    occupying a fixed-duration window (VISIT_DEFAULT_DURATION_MINUTES) starting at
+    its scheduled_date. A configurable buffer (VISIT_CONFLICT_BUFFER_MINUTES) is
+    applied to both sides of the overlap check. Cancelled and completed visits
+    never conflict.
+
+    Overlap is scoped to (user_id, property_id): a user may have concurrent
+    visits for *different* properties, and an agent may show the same property
+    to multiple users at the same time.
+    """
+    duration = timedelta(minutes=settings.VISIT_DEFAULT_DURATION_MINUTES)
+    buffer = timedelta(minutes=settings.VISIT_CONFLICT_BUFFER_MINUTES)
+
+    new_start = scheduled_date
+    new_end = new_start + duration
+    # Coarse window to limit the candidate set; the precise check runs in Python.
+    window_start = new_start - duration - buffer
+    window_end = new_end + buffer
+
+    stmt = select(Visit).where(
+        Visit.user_id == user_id,
+        Visit.property_id == property_id,
+        Visit.status.notin_([VisitStatus.cancelled, VisitStatus.completed]),
+        Visit.scheduled_date >= window_start,
+        Visit.scheduled_date <= window_end,
+    )
+    result = await db.execute(stmt)
+    existing_visits = result.scalars().all()
+
+    for existing in existing_visits:
+        existing_start = existing.scheduled_date
+        existing_end = existing_start + duration
+        # Two intervals [a, b) and [c, d) overlap iff a < d and c < b.
+        # Apply the buffer to both sides so back-to-back visits still conflict.
+        if (existing_start - buffer) < new_end and (existing_end + buffer) > new_start:
+            raise ConflictException(
+                detail="You already have a visit scheduled that overlaps this time",
+                error_code="VISIT_CONFLICT",
+            )
+
+
 async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     """Create a new visit"""
     visit_data = visit.model_dump()
@@ -126,9 +182,12 @@ async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     elif visit_data.get("counterparty_user_id") is not None:
         raise BadRequestException(detail="counterparty_user_id is only supported for flatmate meetings")
 
+    # --- Overlap detection: prevent double-booking the user ---
+    property_id = visit_data["property_id"]
+    await _ensure_no_visit_conflict(db, user_id, property_id, scheduled_date)
+
     db_visit = Visit(**visit_data)
     db.add(db_visit)
-    # Flush to assign PK, then re-select with eager-loaded relationships
     await db.flush()
     stmt = (
         select(Visit)
@@ -160,37 +219,41 @@ async def get_visit(db: AsyncSession, visit_id: int):
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
-async def get_user_visits(db: AsyncSession, user_id: int):
-    """Get all visits for a user"""
+async def get_user_visits(
+    db: AsyncSession,
+    user_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list, dict | None, int | None]:
+    """Get all visits for a user (keyset-paginated)."""
     stmt = (
         select(Visit)
         .options(*_visit_load_options())
         .where(or_(Visit.user_id == user_id, Visit.counterparty_user_id == user_id))
-        .order_by(Visit.scheduled_date.desc())
     )
-    result = await db.execute(stmt)
-    visits = result.scalars().all()
+    count_total = None
+    if with_total:
+        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+    return rows, next_payload, count_total
 
-    # Count visits by status (handle tz-naive dates from DB)
-    now = datetime.now(timezone.utc)
-    upcoming = sum(
-        1
-        for v in visits
-        if v.status in [VisitStatus.scheduled, VisitStatus.confirmed, VisitStatus.rescheduled] and v.scheduled_date is not None and (sd := make_tz_aware(v.scheduled_date)) is not None and sd > now
-    )
-    completed = sum(1 for v in visits if v.status == VisitStatus.completed)
-    cancelled = sum(1 for v in visits if v.status == VisitStatus.cancelled)
-
-    return {
-        "visits": visits,
-        "total": len(visits),
-        "upcoming": upcoming,
-        "completed": completed,
-        "cancelled": cancelled
-    }
-
-async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
-    """Get upcoming visits for a user"""
+async def get_user_upcoming_visits(
+    db: AsyncSession,
+    user_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list, dict | None, int | None]:
+    """Get upcoming visits for a user (keyset-paginated)."""
     now = datetime.now(timezone.utc)
     stmt = (
         select(Visit)
@@ -200,14 +263,29 @@ async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
             Visit.scheduled_date > now,
             Visit.status.in_([VisitStatus.scheduled, VisitStatus.confirmed, VisitStatus.rescheduled])
         )
-        .order_by(Visit.scheduled_date)
     )
-    result = await db.execute(stmt)
-    visits = result.scalars().all()
-    return {"visits": visits, "total": len(visits)}
+    count_total = None
+    if with_total:
+        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=False)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.asc(), Visit.id.asc()).limit(limit + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+    return rows, next_payload, count_total
 
-async def get_user_past_visits(db: AsyncSession, user_id: int):
-    """Get past visits for a user"""
+async def get_user_past_visits(
+    db: AsyncSession,
+    user_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list, dict | None, int | None]:
+    """Get past visits for a user (keyset-paginated)."""
     now = datetime.now(timezone.utc)
     stmt = (
         select(Visit)
@@ -216,11 +294,20 @@ async def get_user_past_visits(db: AsyncSession, user_id: int):
             or_(Visit.user_id == user_id, Visit.counterparty_user_id == user_id),
             Visit.scheduled_date < now
         )
-        .order_by(Visit.scheduled_date.desc())
     )
-    result = await db.execute(stmt)
-    visits = result.scalars().all()
-    return {"visits": visits, "total": len(visits)}
+    count_total = None
+    if with_total:
+        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+    return rows, next_payload, count_total
 
 async def update_visit(db: AsyncSession, visit_id: int, visit_update: VisitUpdate):
     """Update a visit"""
@@ -344,42 +431,40 @@ async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, 
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
-async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit: int = 20):
-    """Get visits handled by a specific agent (paginated)."""
-    offset = (page - 1) * limit
-
-    # Page data
+async def get_agent_visits(
+    db: AsyncSession,
+    agent_id: int,
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list[VisitSchema], dict | None, int | None]:
+    """Get visits handled by a specific agent (keyset-paginated)."""
     stmt = (
         select(Visit)
         .options(*_visit_load_options())
         .where(Visit.agent_id == agent_id)
-        .order_by(Visit.scheduled_date.desc())
-        .offset(offset)
-        .limit(limit)
     )
+
+    count_total = None
+    if with_total:
+        count_stmt = select(func.count()).where(Visit.agent_id == agent_id)
+        count_result = await db.execute(count_stmt)
+        count_total = count_result.scalar_one()
+
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
     result = await db.execute(stmt)
-    rows = result.scalars().all()
-    # Convert to Pydantic models to ensure JSON serialization with generic PaginatedResponse
+    rows = list(result.scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+
     items = [VisitSchema.model_validate(r, from_attributes=True) for r in rows]
-
-    # Total count
-    total_stmt = select(func.count(Visit.id)).where(Visit.agent_id == agent_id)
-    total_result = await db.execute(total_stmt)
-    total = int(total_result.scalar() or 0)
-
-    total_pages = (total + limit - 1) // limit if limit else 1
-    has_next = page < total_pages
-    has_prev = page > 1 and total > 0
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": total_pages,
-        "has_next": has_next,
-        "has_prev": has_prev,
-    }
+    return items, next_payload, count_total
 
 async def mark_visit_completed(db: AsyncSession, visit_id: int, notes: str | None = None, feedback: str | None = None):
     """Mark a visit as completed"""
@@ -427,23 +512,18 @@ async def get_user_property_visit_stats(db: AsyncSession, user_id: int, property
 async def get_all_visits(
     db: AsyncSession,
     *,
-    page: int = 1,
+    cursor_payload: dict,
     limit: int = 20,
+    with_total: bool = False,
     status: str | None = None,
     filter_agent_id: int | None = None,
     property_id: int | None = None,
     user_id: int | None = None,
-):
-    """Global visit listing with optional filters and pagination.
-
-    When filter_agent_id is provided, returns visits for users/properties assigned to that agent.
-    """
-    offset = (page - 1) * limit
+) -> tuple[list, dict | None, int | None]:
+    """Global visit listing with optional filters and keyset pagination."""
     Owner = aliased(User)
 
-    base = select(Visit).options(
-        *_visit_load_options(),
-    )
+    stmt = select(Visit).options(*_visit_load_options())
     filters = []
     if status:
         filters.append(Visit.status == status)
@@ -453,47 +533,23 @@ async def get_all_visits(
         filters.append(Visit.user_id == user_id)
 
     if filter_agent_id is not None:
-        # Visits where the visiting user is assigned to agent OR the property's owner is assigned to agent
-        base = base.outerjoin(User, Visit.user_id == User.id).outerjoin(Property, Visit.property_id == Property.id).outerjoin(Owner, Property.owner_id == Owner.id)
+        stmt = stmt.outerjoin(User, Visit.user_id == User.id).outerjoin(Property, Visit.property_id == Property.id).outerjoin(Owner, Property.owner_id == Owner.id)
         filters.append(or_(User.agent_id == filter_agent_id, Owner.agent_id == filter_agent_id))
 
-    query = base
     if filters:
-        query = query.where(and_(*filters))
-    query = query.order_by(Visit.scheduled_date.desc()).offset(offset).limit(limit)
-    result = await db.execute(query)
-    rows = result.scalars().all()
-    items = [VisitSchema.model_validate(r, from_attributes=True) for r in rows]
+        stmt = stmt.where(and_(*filters))
 
-    # Count total with same filters
-    count_query = select(func.count(Visit.id))
-    if filter_agent_id is not None:
-        count_query = (
-            count_query.outerjoin(User, Visit.user_id == User.id)
-            .outerjoin(Property, Visit.property_id == Property.id)
-            .outerjoin(Owner, Property.owner_id == Owner.id)
-            .where(or_(User.agent_id == filter_agent_id, Owner.agent_id == filter_agent_id))
-        )
-    if status:
-        count_query = count_query.where(Visit.status == status)
-    if property_id:
-        count_query = count_query.where(Visit.property_id == property_id)
-    if user_id:
-        count_query = count_query.where(Visit.user_id == user_id)
+    count_total = None
+    if with_total:
+        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
 
-    count_result = await db.execute(count_query)
-    total = int(count_result.scalar() or 0)
-
-    total_pages = (total + limit - 1) // limit if limit else 1
-    has_next = page < total_pages
-    has_prev = page > 1 and total > 0
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": total_pages,
-        "has_next": has_next,
-        "has_prev": has_prev,
-    }
+    predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
+    stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        next_payload = keyset_payload(keyset_sort_value(rows[-1].scheduled_date), rows[-1].id)
+    return rows, next_payload, count_total

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +17,9 @@ from app.schemas.common import (
     AssignAgentPayload,
     MessageResponse,
     NotificationSettings,
-    PaginatedResponse,
     PrivacySettings,
 )
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.user import LocationUpdate, PhoneUpdate, UserPreferences, UserUpdate
 from app.schemas.user import User as UserSchema
 from app.services.agent import assign_agent_to_user
@@ -40,13 +42,13 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-@router.get("/me", response_model=UserSchema)
+@router.get("/me", response_model=UserSchema, summary="Get current user")
 async def get_user_me(current_user: User = Depends(get_current_active_user)):
     """Get current user profile (alias for /profile)."""
     return UserSchema.model_validate(current_user)
 
 
-@router.get("/me/auth-state")
+@router.get("/me/auth-state", summary="Get current user auth state")
 async def get_auth_state(
     app: str = Query("flatmates", min_length=1, description="App slug for onboarding check"),
     current_user: User = Depends(get_current_active_user),
@@ -67,7 +69,7 @@ async def get_auth_state(
     return await compute_auth_gate_state(db, current_user, app=app)
 
 
-@router.post("/me/onboarding", response_model=UserSchema)
+@router.post("/me/onboarding", response_model=UserSchema, summary="Complete user onboarding")
 async def complete_onboarding(
     app: str = Query(..., min_length=1, description="App slug whose onboarding to complete"),
     current_user: User = Depends(get_current_active_user),
@@ -82,7 +84,7 @@ async def complete_onboarding(
     return UserSchema.model_validate(updated)
 
 
-@router.get("/me/identities")
+@router.get("/me/identities", summary="List linked identities")
 async def get_linked_identities(
     current_user: User = Depends(get_current_active_user),
 ):
@@ -105,7 +107,7 @@ async def get_linked_identities(
     return {"identities": identities}
 
 
-@router.delete("/me", response_model=MessageResponse)
+@router.delete("/me", response_model=MessageResponse, summary="Delete my account")
 async def delete_my_account(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -120,7 +122,7 @@ async def delete_my_account(
     return MessageResponse(message="Account deleted successfully")
 
 
-@router.put("/me", response_model=UserSchema)
+@router.put("/me", response_model=UserSchema, summary="Update current user")
 async def update_user_me(
     user_update: UserUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -133,7 +135,7 @@ async def update_user_me(
     return UserSchema.model_validate(updated_user)
 
 
-@router.put("/me/phone", response_model=UserSchema)
+@router.put("/me/phone", response_model=UserSchema, summary="Update current user phone")
 async def update_user_phone(
     phone_update: PhoneUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -191,7 +193,7 @@ async def _upload_avatar(
     return UserSchema.model_validate(current_user)
 
 
-@router.post("/me/avatar", response_model=UserSchema)
+@router.post("/me/avatar", response_model=UserSchema, summary="Upload user avatar")
 async def upload_user_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
@@ -208,7 +210,7 @@ async def upload_user_avatar(
     return await _upload_avatar(file, current_user, db)
 
 
-@router.post("/me/profile-image", response_model=UserSchema)
+@router.post("/me/profile-image", response_model=UserSchema, summary="Upload user profile image")
 async def upload_user_profile_image(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
@@ -222,13 +224,13 @@ async def upload_user_profile_image(
     return await _upload_avatar(file, current_user, db)
 
 
-@router.get("/profile", response_model=UserSchema)
+@router.get("/profile", response_model=UserSchema, summary="Get user profile")
 async def get_user_profile(current_user: User = Depends(get_current_active_user)):
     """Get current user profile"""
     return UserSchema.model_validate(current_user)
 
 
-@router.put("/profile", response_model=UserSchema)
+@router.put("/profile", response_model=UserSchema, summary="Update user profile")
 async def update_user_profile(
     user_update: UserUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -241,7 +243,7 @@ async def update_user_profile(
     return UserSchema.model_validate(updated_user)
 
 
-@router.put("/preferences", response_model=MessageResponse)
+@router.put("/preferences", response_model=MessageResponse, summary="Update user preferences")
 async def update_preferences(
     preferences: UserPreferences,
     current_user: User = Depends(get_current_active_user),
@@ -256,7 +258,7 @@ async def update_preferences(
     return MessageResponse(message="Preferences updated successfully")
 
 
-@router.put("/location", response_model=MessageResponse)
+@router.put("/location", response_model=MessageResponse, summary="Update user location")
 async def update_location(
     location_update: LocationUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -269,7 +271,7 @@ async def update_location(
     return MessageResponse(message="Location updated successfully")
 
 
-@router.get("/notification-settings", response_model=NotificationSettings)
+@router.get("/notification-settings", response_model=NotificationSettings, summary="Get notification settings")
 async def get_notification_settings(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -285,7 +287,7 @@ async def get_notification_settings(
     return NotificationSettings(**raw)
 
 
-@router.put("/notification-settings", response_model=MessageResponse)
+@router.put("/notification-settings", response_model=MessageResponse, summary="Update notification settings")
 async def update_notification_settings(
     settings: NotificationSettings,
     current_user: User = Depends(get_current_active_user),
@@ -300,7 +302,7 @@ async def update_notification_settings(
     return MessageResponse(message="Notification settings updated successfully")
 
 
-@router.put("/notifications", response_model=UserSchema)
+@router.put("/notifications", response_model=UserSchema, summary="Update notifications")
 async def update_notifications_compat(
     settings: dict,
     current_user: User = Depends(get_current_active_user),
@@ -316,7 +318,7 @@ async def update_notifications_compat(
     return UserSchema.model_validate(user)
 
 
-@router.get("/privacy-settings", response_model=PrivacySettings)
+@router.get("/privacy-settings", response_model=PrivacySettings, summary="Get privacy settings")
 async def get_privacy_settings(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -327,7 +329,7 @@ async def get_privacy_settings(
     return PrivacySettings(**raw)
 
 
-@router.put("/privacy-settings", response_model=MessageResponse)
+@router.put("/privacy-settings", response_model=MessageResponse, summary="Update privacy settings")
 async def update_privacy_settings(
     settings: PrivacySettings,
     current_user: User = Depends(get_current_active_user),
@@ -338,7 +340,7 @@ async def update_privacy_settings(
     return MessageResponse(message="Privacy settings updated successfully")
 
 
-@router.put("/privacy", response_model=UserSchema)
+@router.put("/privacy", response_model=UserSchema, summary="Update privacy")
 async def update_privacy_compat(
     settings: dict,
     current_user: User = Depends(get_current_active_user),
@@ -352,10 +354,9 @@ async def update_privacy_compat(
 
 
 # Admin/Agent management endpoints
-@router.get("", response_model=PaginatedResponse)
+@router.get("", response_model=CursorPage[UserSchema], summary="List users")
 async def list_users(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     q: str | None = Query(None, description="Search by name/email/phone"),
     agent_id: int | None = Query(None, description="Filter by agent id (admin only)"),
     current_user: User = Depends(get_current_active_user),
@@ -370,40 +371,33 @@ async def list_users(
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
             # Agents without linked agent profile manage nobody
-            return {
-                "items": [],
-                "total": 0,
-                "page": page,
-                "limit": limit,
-                "total_pages": 0,
-                "has_next": False,
-                "has_prev": False,
-            }
+            return build_cursor_page([], limit=page.limit, next_payload=None, total=None)
     else:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    users, total = await get_all_users(
-        db, page=page, limit=limit, search_query=q, filter_agent_id=effective_agent_id
+    users, next_payload, total = await get_all_users(
+        db,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
+        search_query=q,
+        filter_agent_id=effective_agent_id,
     )
-    items = [UserSchema.model_validate(u) for u in users]
-    total_pages = (total + limit - 1) // limit
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": total_pages,
-        "has_next": page < total_pages,
-        "has_prev": page > 1,
-    }
+    return build_cursor_page(
+        [UserSchema.model_validate(u) for u in users],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
-@router.get("/{user_id}", response_model=UserSchema)
+@router.get("/{user_id}", response_model=UserSchema, summary="Get user details")
 async def get_user_details(
     user_id: int,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Get user details."""
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -418,7 +412,7 @@ async def get_user_details(
     return UserSchema.model_validate(user)
 
 
-@router.put("/{user_id}", response_model=UserSchema)
+@router.put("/{user_id}", response_model=UserSchema, summary="Update user")
 async def update_user_details(
     user_id: int,
     user_update: UserUpdate,
@@ -426,19 +420,21 @@ async def update_user_details(
     db: AsyncSession = Depends(get_db),
 ):
     # Admin can update any user; Agent can update limited fields for assigned users
+    """Update user."""
     updated_user = await update_user(db, user_id, user_update, actor=current_user)
     if not updated_user:
         raise HTTPException(status_code=404, detail="User not found")
     return UserSchema.model_validate(updated_user)
 
 
-@router.post("/{user_id}/assign-agent", response_model=MessageResponse)
+@router.post("/{user_id}/assign-agent", response_model=MessageResponse, summary="Assign agent to user")
 async def assign_agent_to_specific_user(
     user_id: int,
     payload: AssignAgentPayload,
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    """Assign agent to user."""
     assignment = await assign_agent_to_user(db, user_id, payload.agent_id)
     if not assignment:
         raise HTTPException(status_code=400, detail="Failed to assign agent")

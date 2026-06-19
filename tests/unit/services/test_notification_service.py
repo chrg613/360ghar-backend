@@ -2,12 +2,12 @@
 Tests for notification service module.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from app.core.exceptions import BadRequestException
-from app.services.notification_config import NotificationChannel, NotificationPriority
+from app.services.notification_config import NotificationChannel
 
 
 class TestBuildMessage:
@@ -256,9 +256,9 @@ class TestListNotificationsForUser:
             "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
-            result = await list_notifications_for_user("user_123", limit=10)
+            rows, next_pg, total = await list_notifications_for_user("user_123", limit=10)
 
-            assert isinstance(result, list)
+            assert isinstance(rows, list)
 
 
 class TestSendToToken:

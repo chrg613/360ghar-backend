@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,13 +15,13 @@ from app.models.enums import (
     PropertyType,
     UserRole,
 )
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.property import (
     Property,
     PropertyCreate,
     PropertyUpdate,
     SortBy,
     UnifiedPropertyFilter,
-    UnifiedPropertyResponse,
 )
 from app.schemas.user import User as UserSchema
 from app.services.flatmates import pause_expired_flatmate_listings
@@ -169,23 +171,48 @@ def build_property_filters(
     )
 
 
-def _build_response_payload(result: dict, filters: UnifiedPropertyFilter, page: int, limit: int):
-    return {
-        "properties": result.get("items", []),
-        "total": result.get("total", 0),
-        "page": page,
-        "limit": limit,
-        "total_pages": result.get("total_pages", 0),
-        "filters_applied": filters.model_dump(exclude_none=True),
-        "search_center": (
-            {"latitude": filters.latitude, "longitude": filters.longitude}
-            if filters.latitude is not None and filters.longitude is not None
-            else None
-        ),
-    }
-
-
-@router.post("", response_model=Property)
+@router.post(
+    "",
+    response_model=Property,
+    summary="Create property",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "rent": {
+                            "value": {
+                                "title": "2BHK Apartment in Koramangala",
+                                "property_type": "apartment",
+                                "purpose": "rent",
+                                "base_price": 50000,
+                                "monthly_rent": 25000,
+                                "city": "Bengaluru",
+                                "locality": "Koramangala",
+                                "bedrooms": 2,
+                                "bathrooms": 2,
+                                "area_sqft": 1200,
+                            }
+                        },
+                        "sale": {
+                            "value": {
+                                "title": "3BHK Villa in Whitefield",
+                                "property_type": "villa",
+                                "purpose": "sale",
+                                "base_price": 12500000,
+                                "city": "Bengaluru",
+                                "locality": "Whitefield",
+                                "bedrooms": 3,
+                                "bathrooms": 3,
+                                "area_sqft": 1800,
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    },
+)
 async def create_new_property(
     property_data: PropertyCreate,
     owner_id: int | None = Query(None, description="Owner id (admin/agent only)"),
@@ -215,21 +242,28 @@ async def create_new_property(
         raise
 
 
-@router.get("/me", response_model=list[Property])
+@router.get("/me", response_model=CursorPage[Property], summary="List my properties")
 async def get_my_properties(
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List properties owned by the current user (requires authentication)."""
-    return await list_user_properties(db, owner_id=current_user.id)
+    cursor_payload = page.decoded()
+    rows, next_payload, total = await list_user_properties(
+        db,
+        owner_id=current_user.id,
+        cursor_payload=cursor_payload,
+        limit=page.limit,
+        with_total=page.include_total,
+    )
+    return build_cursor_page(rows, limit=page.limit, next_payload=next_payload, total=total)
 
 
-@router.get("", response_model=UnifiedPropertyResponse)
+@router.get("", response_model=CursorPage[Property], summary="List properties")
 async def get_properties_list(
     filters: UnifiedPropertyFilter = Depends(build_property_filters),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int | None = Query(None, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -247,33 +281,33 @@ async def get_properties_list(
     if filters.semantic_search and not filters.search_query:
         raise HTTPException(status_code=400, detail="semantic_search requires a search query (q)")
 
-    # Use user_id if authenticated, otherwise use None
     user_id = current_user.id if current_user else None
 
-    # Log search request
+    cursor_payload = page.decoded()
     logger.info(
         "Property search request",
         extra={
             "user": user_id or "anonymous",
             "has_semantic": filters.semantic_search,
             "query": filters.search_query,
-            "page": page,
+            "offset": cursor_payload.get("o", 0),
             "radius": filters.radius_km,
         },
     )
 
     try:
-        effective_page = (offset // limit) + 1 if offset is not None else page
         await pause_expired_flatmate_listings(db)
-        result = await get_unified_properties_optimized(db, filters, user_id, effective_page, limit)
-
-        logger.info(
-            "Property search completed - found %s properties, returning page %s",
-            result.get("total", 0),
-            effective_page,
+        rows, next_payload, total = await get_unified_properties_optimized(
+            db, filters, user_id, cursor_payload, page.limit,
+            with_total=page.include_total,
         )
 
-        return _build_response_payload(result, filters, effective_page, limit)
+        logger.info(
+            "Property search completed — found %s properties",
+            len(rows),
+        )
+
+        return build_cursor_page(rows, limit=page.limit, next_payload=next_payload, total=total)
     except Exception as e:
         if is_transient_db_error(e):
             error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
@@ -294,11 +328,10 @@ async def get_properties_list(
         raise
 
 
-@router.get("/semantic-search", response_model=UnifiedPropertyResponse)
+@router.get("/semantic-search", response_model=CursorPage[Property], summary="Semantic property search")
 async def semantic_property_search(
     filters: UnifiedPropertyFilter = Depends(build_property_filters),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     current_user: UserSchema | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -317,13 +350,17 @@ async def semantic_property_search(
 
     logger.info(
         "Semantic property search request",
-        extra={"user": user_id or "anonymous", "query": filters.search_query, "page": page},
+        extra={"user": user_id or "anonymous", "query": filters.search_query},
     )
 
     try:
+        cursor_payload = page.decoded()
         await pause_expired_flatmate_listings(db)
-        result = await get_unified_properties_optimized(db, filters, user_id, page, limit)
-        return _build_response_payload(result, filters, page, limit)
+        rows, next_payload, total = await get_unified_properties_optimized(
+            db, filters, user_id, cursor_payload, page.limit,
+            with_total=page.include_total,
+        )
+        return build_cursor_page(rows, limit=page.limit, next_payload=next_payload, total=total)
     except Exception as e:
         if is_transient_db_error(e):
             error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
@@ -339,22 +376,31 @@ async def semantic_property_search(
         raise
 
 
-@router.get("/recommendations")
+@router.get("/recommendations", response_model=CursorPage[Property], summary="List recommended properties")
 async def get_recommendations(
+    page: CursorParams = Depends(),
     current_user: UserSchema | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(10, ge=1, le=50),
 ):
     """
     Get property recommendations with optional authentication.
 
     - With authentication: Personalized recommendations based on user preferences and swipes
     - Without authentication: Popular properties based on likes and recency
+
+    Note: `total` is always null for recommendations (no cheap COUNT query).
+    Pass `include_total=true` to request it, but the service does not compute it
+    and will return `null`.
     """
     user_id = current_user.id if current_user else None
     try:
+        cursor_payload = page.decoded()
         await pause_expired_flatmate_listings(db)
-        return await get_property_recommendations(db, user_id, limit)
+        rows, next_payload, total = await get_property_recommendations(
+            db, user_id, cursor_payload, page.limit,
+            with_total=page.include_total,
+        )
+        return build_cursor_page(rows, limit=page.limit, next_payload=next_payload, total=total)
     except Exception as e:
         if is_transient_db_error(e):
             error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
@@ -374,7 +420,7 @@ async def get_recommendations(
         raise
 
 
-@router.get("/{property_id}", response_model=Property)
+@router.get("/{property_id}", response_model=Property, summary="Get property details")
 async def get_property_details(
     property_id: int,
     request: Request,
@@ -425,7 +471,28 @@ async def get_property_details(
     return property_data
 
 
-@router.put("/{property_id}", response_model=Property)
+@router.put(
+    "/{property_id}",
+    response_model=Property,
+    summary="Update property",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "update": {
+                            "value": {
+                                "title": "Updated 2BHK Apartment in Koramangala",
+                                "monthly_rent": 28000,
+                                "status": "active",
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    },
+)
 async def update_property_details(
     property_id: int,
     property_update: PropertyUpdate,
@@ -436,7 +503,7 @@ async def update_property_details(
     return await update_property(db, property_id, property_update, current_user)
 
 
-@router.delete("/{property_id}")
+@router.delete("/{property_id}", summary="Delete property")
 async def delete_property_endpoint(
     property_id: int,
     db: AsyncSession = Depends(get_db),
