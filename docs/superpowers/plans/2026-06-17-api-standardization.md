@@ -321,7 +321,7 @@ async def list_pm_leases(
     )
 ```
 
-> For endpoints that returned a bespoke envelope (`BookingList`, `SwipeHistoryResponse`, `BlogPostListResponse`, `PaginatedTourResponse`, `MediaListResponse`, `AIJobListResponse`): replace the bespoke response_model with `CursorPage[<ItemSchema>]`. Delete the now-unused bespoke list schema if nothing else imports it (grep first).
+> For endpoints that returned a bespoke envelope (`SwipeHistoryResponse`, `BlogPostListResponse`, `PaginatedTourResponse`, `MediaListResponse`, `AIJobListResponse`): replace the bespoke response_model with `CursorPage[<ItemSchema>]`. Delete the now-unused bespoke list schema if nothing else imports it (grep first).
 
 ### Task 2: Convert `pm_leases` (worked reference — keyset)
 
@@ -442,7 +442,7 @@ For each row in the **Conversion Inventory** below: one task = one router file. 
 **Notes for tricky ones:**
 - **Properties (Task 24):** `GET /properties` and `/semantic-search` sort by distance/relevance — use offset-fallback. The repository (`app/repositories/property_repository.py` / `property_query_builder.py`) is where offset/limit live; thread `cursor_payload`/`limit`/`with_total` through the repo method instead of `page`/`limit`. The endpoint currently accepts both `page`/`limit` and an optional `offset` — remove all three, add `CursorParams`. `UnifiedPropertyResponse` becomes `CursorPage[PropertyListItem]` (use the existing item schema the response wraps).
 - **Flatmates profiles (Task 14):** discovery feed may be score/distance sorted — if so use offset-fallback; matches/likes are keyset on `created_at, id`.
-- After each task, also delete the obsolete bespoke list/response schema if unused (grep `rg "PaginatedTourResponse|BookingList|SwipeHistoryResponse|MediaListResponse|AIJobListResponse|BlogPostListResponse|BlogCategoryListResponse|BlogTagListResponse"` before deleting).
+- After each task, also delete the obsolete bespoke list/response schema if unused (grep `rg "PaginatedTourResponse|SwipeHistoryResponse|MediaListResponse|AIJobListResponse|BlogPostListResponse|BlogCategoryListResponse|BlogTagListResponse"` before deleting).
 
 ### Task 29: Remove legacy pagination from `common.py`
 

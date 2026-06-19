@@ -86,6 +86,7 @@ bg_engine = create_async_engine(settings.ASYNC_DATABASE_URL, **_bg_engine_kwargs
 # ── Slow-checkout logging ──────────────────────────────────────────────────────
 _SLOW_CHECKOUT_THRESHOLD_S = 5.0
 _SESSION_HOLD_WARN_S = 30.0
+_disposing = False  # set True during engine.dispose() to suppress teardown noise
 
 
 def _on_checkout(dbapi_conn, connection_record, connection_proxy):
@@ -94,6 +95,8 @@ def _on_checkout(dbapi_conn, connection_record, connection_proxy):
 
 def _make_checkin_logger(pool_label: str, pool):
     def _on_checkin(dbapi_conn, connection_record):
+        if _disposing:
+            return
         start = connection_record.info.pop("_checkout_start", None)
         if start is not None:
             elapsed = time.monotonic() - start
@@ -190,6 +193,12 @@ async def get_bg_db() -> AsyncGenerator[AsyncSession, None]:
             # Only commit if the background task actually mutated state.
             if session.new or session.dirty or session.deleted:
                 await session.commit()
+
+
+def mark_engines_disposing() -> None:
+    """Suppress slow-checkout warnings during engine.dispose() teardown."""
+    global _disposing
+    _disposing = True
 
 
 def get_async_session_factory():

@@ -12,7 +12,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.enums import BookingStatus, PaymentStatus
-from app.schemas.booking import Booking, BookingList
+from app.schemas.booking import Booking
 
 
 def create_mock_booking(
@@ -61,19 +61,6 @@ def create_mock_booking(
         host_review=None,
         created_at=datetime.now(timezone.utc),
         updated_at=None,
-    )
-
-
-def create_mock_booking_list(bookings: list = None) -> BookingList:
-    """Create a mock booking list response."""
-    if bookings is None:
-        bookings = []
-    return BookingList(
-        bookings=bookings,
-        total=len(bookings),
-        upcoming=0,
-        completed=0,
-        cancelled=0,
     )
 
 

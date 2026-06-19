@@ -12,7 +12,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.enums import VisitStatus
-from app.schemas.visit import Visit, VisitList, VisitSlice
+from app.schemas.visit import Visit, VisitSlice
 
 
 def create_mock_visit(
@@ -41,19 +41,6 @@ def create_mock_visit(
         updated_at=None,
         property=None,
         special_requirements=None,
-    )
-
-
-def create_mock_visit_list(visits: list = None) -> VisitList:
-    """Create a mock visit list response."""
-    if visits is None:
-        visits = []
-    return VisitList(
-        visits=visits,
-        total=len(visits),
-        upcoming=0,
-        completed=0,
-        cancelled=0,
     )
 
 

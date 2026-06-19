@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.core.cache import initialize_cache, shutdown_cache
-from app.core.database import bg_engine, engine
+from app.core.database import bg_engine, engine, mark_engines_disposing
 from app.core.http import close_all_clients as close_all_http_clients
 from app.core.logging import get_logger
 from app.infrastructure.scheduler import shutdown_scheduler, start_scheduler
@@ -27,6 +27,14 @@ def create_lifespan(testing: bool, user_mcp_app: Any, admin_mcp_app: Any) -> Lif
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Eagerly initialize MCP apps so their lifespan context managers are
+        # created in *this* async context (not lazily in a request handler).
+        # Without this, ContextVar tokens set during lazy init in a request
+        # context cannot be reset during shutdown in the server context,
+        # causing "ValueError: was created in a different Context".
+        await user_mcp_app._ensure_app()
+        await admin_mcp_app._ensure_app()
+
         async with user_mcp_app.lifespan(app):
             async with admin_mcp_app.lifespan(app):
                 try:
@@ -60,6 +68,7 @@ def create_lifespan(testing: bool, user_mcp_app: Any, admin_mcp_app: Any) -> Lif
                     await close_all_http_clients()
                     _shutdown_notification_executor()
                     await _shutdown_cache()
+                mark_engines_disposing()
                 await engine.dispose()
                 await bg_engine.dispose()
                 logger.info("API shutdown", extra={"event": "shutdown"})

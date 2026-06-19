@@ -120,13 +120,6 @@ class Booking(BookingBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class BookingList(BaseModel):
-    bookings: list[Booking]
-    total: int
-    upcoming: int
-    completed: int
-    cancelled: int
-
 class BookingAvailability(BaseModel):
     property_id: int
     check_in_date: datetime

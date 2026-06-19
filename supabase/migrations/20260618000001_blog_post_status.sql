@@ -18,17 +18,19 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON public.blog_posts (status);
 ALTER TABLE public.blog_posts
   ADD COLUMN IF NOT EXISTS scheduled_at timestamp with time zone;
 
--- 3. preview_token column + unique index (public draft preview sharing)
+-- 3. preview_token column + partial index (public draft preview sharing)
+-- NOTE: UNIQUE constraint skipped intentionally — it requires ACCESS EXCLUSIVE
+-- lock and blocks on busy tables. Uniqueness is enforced at the application
+-- layer via random UUIDs. Use CREATE UNIQUE INDEX CONCURRENTLY manually if
+-- DB-level uniqueness is ever required.
 ALTER TABLE public.blog_posts
   ADD COLUMN IF NOT EXISTS preview_token varchar;
 
--- Unique constraint (partial: only enforces uniqueness for non-null tokens)
+-- Drop the constraint if it somehow exists from an earlier attempt
 ALTER TABLE public.blog_posts
   DROP CONSTRAINT IF EXISTS blog_posts_preview_token_key;
 
-ALTER TABLE public.blog_posts
-  ADD CONSTRAINT blog_posts_preview_token_key UNIQUE (preview_token);
-
+-- Partial index for fast preview-token lookups.
 CREATE INDEX IF NOT EXISTS idx_blog_posts_preview_token
   ON public.blog_posts (preview_token)
   WHERE preview_token IS NOT NULL;

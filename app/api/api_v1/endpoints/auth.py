@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.config import settings
+from app.schemas.common import MessageResponse
 from app.core.auth import AuthFailureReason, _is_failure, admin_link_identity
 from app.core.database import get_db
 from app.core.exceptions import BadRequestException, RateLimitException, ServiceUnavailableException
@@ -115,16 +116,17 @@ async def identifier_status(
 
 @router.post(
     "/last-method",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=MessageResponse,
     summary="Record the last authentication method used by the current user",
 )
 async def last_method(
     body: LastMethodRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> MessageResponse:
     """AUTH required. Persist ``method`` on the current user."""
     await set_last_auth_method(db, current_user, body.method)
+    return MessageResponse(message="ok")
 
 
 @router.post(
@@ -182,13 +184,13 @@ async def auth_config() -> AuthConfigResponse:
 
 @router.post(
     "/delete-account",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=MessageResponse,
     summary="Permanently delete the current user's account",
 )
 async def delete_account(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> MessageResponse:
     """AUTH required. Permanently delete the caller's own account.
 
     Hard-deletes the Supabase Auth user (revoking all sessions) and
@@ -196,3 +198,4 @@ async def delete_account(
     5.1.1(v) compliance: the account becomes permanently unusable.
     """
     await delete_user_account(db, current_user)
+    return MessageResponse(message="account deleted")

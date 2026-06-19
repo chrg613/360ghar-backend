@@ -110,13 +110,6 @@ class Visit(VisitBase):
         except ValueError:
             return VisitContext.property_tour
 
-class VisitList(BaseModel):
-    visits: list[Visit]
-    total: int
-    upcoming: int
-    completed: int
-    cancelled: int
-
 class VisitSlice(BaseModel):
     visits: list[Visit]
     total: int

@@ -6,7 +6,6 @@ from app.schemas.booking import (
     BookingBase,
     BookingCancel,
     BookingCreate,
-    BookingList,
     BookingPayment,
     BookingPricing,
     BookingReview,
@@ -91,7 +90,6 @@ from app.schemas.visit import (
     VisitBase,
     VisitCancel,
     VisitCreate,
-    VisitList,
     VisitReschedule,
     VisitSlice,
     VisitUpdate,
@@ -132,7 +130,6 @@ __all__ = [
     "VisitReschedule",
     "VisitCancel",
     "VisitSchema",
-    "VisitList",
     "VisitSlice",
     # Booking schemas
     "BookingBase",
@@ -142,7 +139,6 @@ __all__ = [
     "BookingPayment",
     "BookingReview",
     "BookingSchema",
-    "BookingList",
     "BookingAvailability",
     "BookingPricing",
     # Payment schemas
