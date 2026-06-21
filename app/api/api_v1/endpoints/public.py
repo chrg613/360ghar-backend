@@ -5,6 +5,7 @@ This module provides unauthenticated endpoints for viewing published tours.
 These endpoints are used by the public viewer and embed page.
 """
 import time
+import uuid as _uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
@@ -128,6 +129,17 @@ async def get_public_tour(
     Returns the complete tour structure including scenes and hotspots,
     ordered by scene order_index.
     """
+    # Validate UUID format before hitting the DB.
+    # PostgreSQL will throw DataError (→ 500) if an invalid string is passed
+    # to a UUID column. Return 404 early to keep this side-effect-free.
+    try:
+        _uuid.UUID(tour_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tour not found",
+        )
+
     # Query tour with scenes and hotspots
     query = select(Tour).where(
         and_(

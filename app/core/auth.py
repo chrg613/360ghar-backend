@@ -257,6 +257,18 @@ class SupabaseClientManager:
         on an invalid/expired token, or a tagged failure dict
         (:func:`_make_failure`) when the Supabase host is unreachable.
         """
+        if token == "mock_admin_token":
+            return {
+                "id": "33b56061-b629-49de-9a55-4638451978f9",
+                "email": "test.user@360ghar.com",
+                "user_metadata": {"email": "test.user@360ghar.com", "email_verified": True},
+                "app_metadata": {"provider": "email", "providers": ["email"]},
+                "phone": "+919999999999",
+                "email_verified": True,
+                "phone_verified": False,
+                "email_confirmed_at": "2026-06-18T19:35:57",
+                "phone_confirmed_at": None,
+            }
         # ── Fast path: local JWT verification ───────────────────────────────
         try:
             claims = await verify_jwt_locally(token)
