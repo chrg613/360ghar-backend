@@ -164,9 +164,18 @@ mcp.json
 # Generated seed data (Category 3 — recreated at runtime)
 seed_data/generated/
 
+# Media files (large binaries — uploaded to Cloudinary at load time)
+seed_data/media/
+seed_data/seed/media/
+
+# Seed data (deterministic generated — recreated with --regenerate)
+seed_data/seed/
+
+# Hardcoded seed data (team-curated, local-only — not version-controlled)
+seed_data/hardcoded/
+
 # Supabase database backups (large, regenerated on demand)
 supabase-backup/
-seed_data/
 
 # Playwright MCP local config
 .playwright-mcp/
@@ -180,3 +189,6 @@ blog_verify_full.png
 
 # Disk cache files
 cache/
+.audit-tokens.json
+audit_results_*.json
+/tmp/360ghar-audit-*

@@ -18,6 +18,19 @@ uv run pytest tests/ -v
 
 > **Note:** Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group. Install with `uv sync --extra dev`.
 
+## Database Migrations
+
+Use `scripts/run_supabase_migrations.py` to apply SQL migrations against the remote Supabase database. Do **not** use `supabase db push` for remote databases — that command is for local development.
+
+```bash
+uv run python scripts/run_supabase_migrations.py              # apply all pending
+uv run python scripts/run_supabase_migrations.py --dry-run    # preview only
+uv run python scripts/run_supabase_migrations.py --file <filename>.sql  # single file
+uv run python scripts/run_supabase_migrations.py --env .env.prod  # use a different env file
+```
+
+The script tracks applied versions in a `schema_migrations` table, making it idempotent.
+
 ## Database Safety Rules
 
 - **Never delete real user data**: Destructive database operations (`DELETE`, `TRUNCATE`, `DROP`) on tables that may contain real user data must be reviewed with the user before execution. Never run `02_clear_data.py` against production.

@@ -58,9 +58,22 @@ uv run python seed_data/02_clear_data.py --confirm               # Wipe all seed
 ### Database
 ```bash
 supabase db reset   # Reset local database
-supabase db push    # Apply migrations
+supabase db push    # Apply migrations (local dev)
 supabase db diff    # Check pending changes
 ```
+
+#### Migrations (remote Supabase)
+
+Use `scripts/run_supabase_migrations.py` to apply migrations against the remote Supabase database. It connects directly via `DATABASE_URL`, tracks applied versions in a `schema_migrations` table, and is idempotent — safe to run repeatedly.
+
+```bash
+uv run python scripts/run_supabase_migrations.py              # apply all pending
+uv run python scripts/run_supabase_migrations.py --dry-run    # preview only
+uv run python scripts/run_supabase_migrations.py --file 20260621000008_flatmates_social.sql  # single file
+uv run python scripts/run_supabase_migrations.py --env .env.prod  # use a different env file
+```
+
+> Always use this script when running migrations on the hosted Supabase database. The `supabase db push` / `supabase db reset` commands are for local development only.
 
 ### Docker
 ```bash
