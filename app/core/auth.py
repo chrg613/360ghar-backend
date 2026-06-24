@@ -253,22 +253,10 @@ class SupabaseClientManager:
 
         Tries local JWKS-based verification first (signature + iss/aud/exp).
         Falls back to Supabase Auth ``GET /auth/v1/user`` introspection when
-        the JWKS is unavailable.  Returns the user dict on success, ``None``
-        on an invalid/expired token, or a tagged failure dict
-        (:func:`_make_failure`) when the Supabase host is unreachable.
+        the JWKS is unavailable. Returns the user dict on success, ``None``
+        on an invalid/expired token, or a tagged failure dict on a transient
+        provider error.
         """
-        if token == "mock_admin_token":
-            return {
-                "id": "33b56061-b629-49de-9a55-4638451978f9",
-                "email": "test.user@360ghar.com",
-                "user_metadata": {"email": "test.user@360ghar.com", "email_verified": True},
-                "app_metadata": {"provider": "email", "providers": ["email"]},
-                "phone": "+919999999999",
-                "email_verified": True,
-                "phone_verified": False,
-                "email_confirmed_at": "2026-06-18T19:35:57",
-                "phone_confirmed_at": None,
-            }
         # ── Fast path: local JWT verification ───────────────────────────────
         try:
             claims = await verify_jwt_locally(token)
@@ -464,7 +452,7 @@ class SupabaseClientManager:
         )
         return None
 
-    async def admin_link_identity(self, user_id: str, provider: str, id_token: str) -> bool:
+    async def admin_link_identity(self, user_id: str, provider: str, id_token: str) -> bool | dict[str, Any]:
         """Link an OAuth identity to an existing Supabase user via GoTrue Admin API.
 
         Returns ``True`` on success, ``False`` on a non-retryable
