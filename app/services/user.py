@@ -17,7 +17,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.utils import utc_now
-from app.models.enums import AuthMethod, UserRole
+from app.models.enums import AuthMethod, FlatmatesProfileStatus, UserRole
 from app.models.users import User
 from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.user import UserUpdate
@@ -437,7 +437,7 @@ async def delete_user_account(db: AsyncSession, user: User) -> None:
     user.flatmates_work_style = None
     # Verification & status fields
     user.is_verified = False
-    user.flatmates_profile_status = None
+    user.flatmates_profile_status = FlatmatesProfileStatus.draft
     user.flatmates_onboarding_completed = False
     user.flatmates_last_active_at = None
     # Auth metadata & cross-app onboarding

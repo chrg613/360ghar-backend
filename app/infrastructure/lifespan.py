@@ -96,6 +96,40 @@ async def _apply_pending_migrations() -> None:
                 "leases: add termination_reason",
                 "ALTER TABLE public.leases ADD COLUMN IF NOT EXISTS termination_reason text",
             ),
+            (
+                "tours: create visibility type",
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_visibility') THEN
+                        CREATE TYPE tour_visibility AS ENUM ('private', 'unlisted', 'public');
+                    END IF;
+                END$$;
+                """
+            ),
+            (
+                "tours: add visibility column",
+                "ALTER TABLE public.tours ADD COLUMN IF NOT EXISTS visibility public.tour_visibility NOT NULL DEFAULT 'private'"
+            ),
+            (
+                "tours: migrate is_public to visibility",
+                """
+                UPDATE public.tours
+                SET visibility = CASE
+                    WHEN is_public = true THEN 'public'::public.tour_visibility
+                    ELSE 'private'::public.tour_visibility
+                END
+                WHERE visibility = 'private' AND is_public = true
+                """
+            ),
+            (
+                "tours: create visibility index",
+                "CREATE INDEX IF NOT EXISTS idx_tours_visibility ON public.tours(visibility)"
+            ),
+            (
+                "tours: create status_visibility index",
+                "CREATE INDEX IF NOT EXISTS idx_tours_status_visibility ON public.tours(status, visibility) WHERE deleted_at IS NULL"
+            ),
         ):
             try:
                 await conn.execute(text(sql))

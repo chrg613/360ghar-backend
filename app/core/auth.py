@@ -253,9 +253,9 @@ class SupabaseClientManager:
 
         Tries local JWKS-based verification first (signature + iss/aud/exp).
         Falls back to Supabase Auth ``GET /auth/v1/user`` introspection when
-        the JWKS is unavailable.  Returns the user dict on success, ``None``
-        on an invalid/expired token, or a tagged failure dict
-        (:func:`_make_failure`) when the Supabase host is unreachable.
+        the JWKS is unavailable. Returns the user dict on success, ``None``
+        on an invalid/expired token, or a tagged failure dict on a transient
+        provider error.
         """
         # ── Fast path: local JWT verification ───────────────────────────────
         try:
@@ -452,7 +452,7 @@ class SupabaseClientManager:
         )
         return None
 
-    async def admin_link_identity(self, user_id: str, provider: str, id_token: str) -> bool:
+    async def admin_link_identity(self, user_id: str, provider: str, id_token: str) -> bool | dict[str, Any]:
         """Link an OAuth identity to an existing Supabase user via GoTrue Admin API.
 
         Returns ``True`` on success, ``False`` on a non-retryable

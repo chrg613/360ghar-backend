@@ -232,6 +232,7 @@ async def create_property(
         # hc_properties ones. Third-party URLs are soft (kept on failure).
         if image_urls:
             image_urls = await _verify_and_clean_image_urls(image_urls)
+        amenity_ids = property_dict.pop("amenity_ids", None)
         if image_urls and not property_dict.get("main_image_url"):
             property_dict["main_image_url"] = image_urls[0]
         property_dict["owner_id"] = owner_id
@@ -252,6 +253,10 @@ async def create_property(
             property_dict["location"] = wkt
 
         db_property = await repo.create(Property(**property_dict))
+
+        if amenity_ids:
+            for amenity_id in set(amenity_ids):
+                db.add(PropertyAmenity(property_id=db_property.id, amenity_id=amenity_id))
         if image_urls:
             await _replace_property_images(
                 db,
@@ -430,6 +435,8 @@ async def update_property(
         # update path. Third-party URLs are soft (kept on failure).
         if image_urls:
             image_urls = await _verify_and_clean_image_urls(image_urls)
+        amenity_ids_present = "amenity_ids" in update_data
+        amenity_ids = update_data.pop("amenity_ids", None)
         if image_urls_present and "main_image_url" not in update_data:
             update_data["main_image_url"] = image_urls[0] if image_urls else None
         final_property_type = update_data.get("property_type", property_obj.property_type)
@@ -486,6 +493,14 @@ async def update_property(
                 property_id=property_id,
                 image_urls=image_urls,
             )
+
+        if amenity_ids_present:
+            await db.execute(
+                sa_delete(PropertyAmenity).where(PropertyAmenity.property_id == property_id)
+            )
+            if amenity_ids:
+                for amenity_id in set(amenity_ids):
+                    db.add(PropertyAmenity(property_id=property_id, amenity_id=amenity_id))
 
         if (
             final_property_type in PG_FLATMATE_TYPES
