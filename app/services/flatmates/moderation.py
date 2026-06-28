@@ -368,20 +368,16 @@ async def create_block(db: AsyncSession, user_id: int, blocked_user_id: int) -> 
 
 
 async def _active_reporter_count(db: AsyncSession, reported_user_id: int) -> int:
-    rows = (
-        await db.execute(
-            select(UserReport.reporter_user_id).where(
-                UserReport.reported_user_id == reported_user_id,
-                UserReport.status.in_(
-                    [
-                        UserReportStatus.open.value,
-                        UserReportStatus.reviewed.value,
-                    ]
-                ),
-            )
-        )
-    ).scalars()
-    return len({int(reporter_id) for reporter_id in rows.all()})
+    stmt = select(func.count(func.distinct(UserReport.reporter_user_id))).where(
+        UserReport.reported_user_id == reported_user_id,
+        UserReport.status.in_(
+            [
+                UserReportStatus.open.value,
+                UserReportStatus.reviewed.value,
+            ]
+        ),
+    )
+    return int((await db.execute(stmt)).scalar() or 0)
 
 
 def apply_report_auto_pause(

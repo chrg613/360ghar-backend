@@ -252,6 +252,17 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str = ""
     MAX_UPLOAD_SIZE_MB: int = 50
 
+    # ── Reverse-proxy / IP extraction ──────────────────────────────────────────
+    # Number of trusted reverse-proxy hops in front of the app. X-Forwarded-For
+    # is a comma-separated chain appended to by each proxy. To get the real
+    # client IP we take the entry that is ``TRUSTED_PROXY_HOPS`` from the right
+    # (0 = peer address is the client, 1 = one proxy in front, etc.). Default 1
+    # works for Railway's single-layer proxy; bump if you chain CDN + app.
+    # Setting this >0 is REQUIRED for rate limiters to be effective — without
+    # it a client can spoof a different X-Forwarded-For on every request and
+    # bypass the per-IP limit.
+    TRUSTED_PROXY_HOPS: int = 1
+
     # ── Tax & Service Rates ────────────────────────────────────────────────────
     GST_RATE: float = 0.18  # 18% GST for booking tax calculation
     SERVICE_CHARGE_RATE: float = 0.05  # 5% service charge for bookings
