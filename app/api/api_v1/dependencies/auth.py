@@ -216,6 +216,120 @@ async def get_current_active_user(
     return current_user
 
 
+async def get_current_user_short_session(
+    request: Request,
+    authorization: str | None = Header(None),
+) -> User:
+    """Resolve the current user without holding a request DB session open."""
+    token = _parse_bearer_token(authorization)
+
+    try:
+        supabase_user_data = await verify_supabase_token(token)
+        if _is_failure(supabase_user_data):
+            token_suffix = token[-8:] if len(token) > 8 else token
+            reason = supabase_user_data.get("reason")
+            if reason == AuthFailureReason.PROVIDER_UNREACHABLE.value:
+                logger.warning(
+                    "Auth provider unreachable (suffix=%s): %s",
+                    token_suffix,
+                    supabase_user_data.get("error"),
+                    extra={
+                        "reason": "auth_provider_unreachable",
+                        "token_suffix": token_suffix,
+                    },
+                )
+                raise _provider_unavailable_response()
+            logger.warning(
+                "Auth provider error (suffix=%s): %s",
+                token_suffix,
+                supabase_user_data.get("error"),
+                extra={"reason": "auth_provider_error", "token_suffix": token_suffix},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "TOKEN_INVALID",
+                    "message": "Invalid or expired token",
+                },
+            )
+        if not supabase_user_data:
+            token_suffix = token[-8:] if len(token) > 8 else token
+            logger.info(
+                "Invalid or expired token (suffix=%s)",
+                token_suffix,
+                extra={"reason": "token_invalid_or_expired", "token_suffix": token_suffix},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "TOKEN_INVALID",
+                    "message": "Invalid or expired token",
+                },
+            )
+
+        session_factory = get_bg_session_factory()
+        async with session_factory() as db:
+            try:
+                db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
+                db.expunge(db_user)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+        request.state.user_id = getattr(db_user, "id", None)
+        request.state.supabase_user_data = supabase_user_data
+        sentry_sdk.set_user({
+            "id": str(getattr(db_user, "id", None)),
+            "email": getattr(db_user, "email", None),
+            "username": getattr(db_user, "phone", None),
+        })
+        logger.debug("User authenticated successfully", extra={"user_id": getattr(db_user, "id", None)})
+        return db_user
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if is_transient_db_error(exc) or is_statement_timeout(exc):
+            logger.warning(
+                "Authentication DB sync temporarily unavailable: %s",
+                exc,
+                exc_info=True,
+                extra={
+                    "reason": "authentication_db_unavailable",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise _auth_db_unavailable_response(exc) from exc
+        logger.error(
+            "Authentication error: %s",
+            exc,
+            exc_info=True,
+            extra={"reason": "authentication_exception", "error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "AUTHENTICATION_FAILED",
+                "message": "Authentication failed",
+            },
+        ) from exc
+
+
+async def get_current_active_user_short_session(
+    current_user: User = Depends(get_current_user_short_session),
+) -> User:
+    """Return the current user only if active, without a long request DB session."""
+    if not getattr(current_user, "is_active", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "USER_INACTIVE",
+                "message": "Inactive user",
+            },
+        )
+    return current_user
+
+
 async def get_current_user_sse(
     request: Request,
     authorization: str | None = Header(None),

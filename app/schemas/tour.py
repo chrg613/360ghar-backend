@@ -200,7 +200,7 @@ class SceneBase(BaseModel):
     metadata: SceneMetadata | None = Field(
         default=None,
         alias="scene_metadata",
-        validation_alias=AliasChoices("metadata", "scene_metadata"),
+        validation_alias=AliasChoices("scene_metadata", "metadata"),
         serialization_alias="metadata",
     )
 
@@ -465,7 +465,7 @@ class TourGenerationSceneInput(BaseModel):
     metadata: SceneMetadata | None = Field(
         default=None,
         alias="scene_metadata",
-        validation_alias=AliasChoices("metadata", "scene_metadata"),
+        validation_alias=AliasChoices("scene_metadata", "metadata"),
         serialization_alias="metadata",
     )
 

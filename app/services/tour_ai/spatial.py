@@ -24,6 +24,7 @@ Navigation pucks are floor-anchored: pitch clamped into [-45, -10].
 """
 from __future__ import annotations
 
+import asyncio
 import math
 from collections import deque
 from typing import Any
@@ -52,11 +53,14 @@ SPATIAL_SYSTEM_PROMPT = (
     "(0 = top, 1 = bottom; a doorway threshold floor is usually 0.6-0.8).\n\n"
     "Rules:\n"
     "- Classify the room from PIXELS, never assume from any filename hint.\n"
-    "- An opening is a doorway (open or closed), an open archway, a glass sliding "
-    "door to a balcony/terrace, or a passage. Do NOT report plain windows or mirrors "
-    "(a mirror reflects the SAME room; a real opening shows a DIFFERENT space).\n"
+    "- An opening is a physical doorway (open or closed), an open archway, a glass sliding "
+    "door to a balcony/terrace, or a passage. Do NOT report plain windows, mirrors, walls, "
+    "curtains, or furniture as openings. DO report stairs (specify if they go UP or DOWN).\n"
+    "- BE CONSERVATIVE: Most rooms only have 1 or 2 doorways. Do NOT hallucinate doorways.\n"
+    "- NEVER return multiple openings for the same physical doorway. Group them into one.\n"
     "- For each opening, say which room type is visible THROUGH it (leads_to_room_type) "
     "and your confidence. If the door is closed/unknown, set leads_to_room_type to null.\n"
+    "- CRITICAL for matching: Describe the VISUAL CONTEXT visible outside/through the doorway (e.g. 'red carpet', 'hardwood floor', 'white tile', 'glass railing', 'brick wall'). If the door is closed, describe the door itself (e.g. 'brown wooden door', 'white paneled door').\n"
     "- Respond with STRICT JSON only, no prose."
 )
 
@@ -75,11 +79,12 @@ def _build_user_prompt(filename_hint: str | None) -> str:
         "feature or the most important onward doorway),\n"
         '  "openings": [\n'
         "    {\n"
-        f'      "type": one of [{", ".join(OPENING_TYPES)}],\n'
+        f'      "type": one of [{", ".join(OPENING_TYPES)}, "stairs_up", "stairs_down"],\n'
         '      "x_fraction": 0.0-1.0,\n'
         '      "floor_y_fraction": 0.0-1.0,\n'
         '      "leads_to_room_type": one of the room types or null if unknown,\n'
         '      "leads_to_confidence": 0.0-1.0,\n'
+        '      "visual_context": "short description of what is visible through the door (flooring, colors) or the door itself if closed",\n'
         '      "label": "short label e.g. \\"to kitchen\\""\n'
         "    }\n"
         "  ]\n"
@@ -124,9 +129,26 @@ async def analyze_panorama(
         room_type = "other"
 
     openings: list[dict[str, Any]] = []
-    for op in raw.get("openings", []) or []:
+    _raw_ops = raw.get("openings", []) or []
+    # Deduplicate openings that are too close horizontally (e.g. same doorway)
+    _filtered_ops = []
+    for op in _raw_ops:
         if not isinstance(op, dict) or "x_fraction" not in op:
             continue
+        x_frac = float(op["x_fraction"])
+        # Check if we already have an opening within 0.08 (approx 30 degrees)
+        is_duplicate = False
+        for ext in _filtered_ops:
+            if min(abs(ext["x_fraction"] - x_frac), 1.0 - abs(ext["x_fraction"] - x_frac)) < 0.08:
+                is_duplicate = True
+                # If this one has higher confidence, keep it instead
+                if float(op.get("leads_to_confidence", 0)) > float(ext.get("leads_to_confidence", 0)):
+                    ext.update(op)
+                break
+        if not is_duplicate:
+            _filtered_ops.append(op)
+
+    for op in _filtered_ops:
         leads = op.get("leads_to_room_type")
         leads = str(leads).strip().lower().replace(" ", "_") if leads else None
         if leads not in ROOM_TYPES:
@@ -138,6 +160,7 @@ async def analyze_panorama(
                 "pitch": _frac_to_floor_pitch(op.get("floor_y_fraction")),
                 "leads_to_room_type": leads,
                 "leads_to_confidence": float(op.get("leads_to_confidence") or 0.0),
+                "visual_context": str(op.get("visual_context") or "").strip(),
                 "label": str(op.get("label") or "").strip(),
             }
         )
@@ -210,13 +233,49 @@ def _match_target(
     candidates = [s for s in scenes if s["room_type"] == leads and s["id"] != source["id"]]
     if not candidates:
         return None
+    
+    # 1. Stair logic filter: if this opening is stairs, the target MUST have complementary stairs
+    op_type = opening.get("type")
+    if op_type in ("stairs_up", "stairs_down"):
+        expected_reciprocal = "stairs_down" if op_type == "stairs_up" else "stairs_up"
+        stair_candidates = []
+        for c in candidates:
+            has_reciprocal_stairs = any(o.get("type") == expected_reciprocal for o in c.get("openings", []))
+            if has_reciprocal_stairs:
+                stair_candidates.append(c)
+        if stair_candidates:
+            candidates = stair_candidates
+        else:
+            # If no complementary stairs found, this connection might be hallucinated or the other room wasn't captured
+            # Be conservative and skip linking, unless it's the only candidate
+            if len(candidates) > 1:
+                return None
+
     if len(candidates) == 1:
         return candidates[0]["id"]
-    # Multiple: prefer one not already linked from this source.
+
+    # Multiple candidates: 
+    # Prefer candidates that have a reciprocal opening pointing back to our room_type
+    scored_candidates = []
     for c in candidates:
+        score = 0
         if c["id"] not in already_linked:
-            return c["id"]
-    return candidates[0]["id"]
+            score += 10 # strongly prefer unlinked rooms
+        
+        # Look for reciprocal opening
+        reciprocals = [o for o in c.get("openings", []) if o.get("leads_to_room_type") == source["room_type"]]
+        if reciprocals:
+            score += 5
+            # Simple text similarity check for visual_context (if they both mention e.g. "red carpet" or "wood")
+            my_ctx = set(opening.get("visual_context", "").lower().replace(",", "").split())
+            best_overlap = max((len(my_ctx.intersection(set(o.get("visual_context", "").lower().replace(",", "").split()))) for o in reciprocals), default=0)
+            score += best_overlap
+            
+        scored_candidates.append((score, c))
+    
+    # Sort by score descending
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    return scored_candidates[0][1]["id"]
 
 
 def _add_hotspot(scene: dict[str, Any], target_id: str, opening: dict[str, Any], target_title: str) -> None:
@@ -279,6 +338,22 @@ def build_graph(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for i, hs in enumerate(deduped):
             hs["order_index"] = i
         s["hotspots"] = deduped
+
+    # Pass 4: compute target_view for traveling effect
+    for s in scenes:
+        for hs in s["hotspots"]:
+            target = by_id.get(hs["target_scene_id"])
+            if not target:
+                continue
+            # find reciprocal hotspot in target leading back to s
+            reciprocal = next((th for th in target["hotspots"] if th["target_scene_id"] == s["id"]), None)
+            if reciprocal:
+                # Target yaw should face away from the returning door
+                entry_yaw = reciprocal["position"]["yaw"]
+                target_yaw = (entry_yaw + 180) % 360
+                if target_yaw > 180:
+                    target_yaw -= 360
+                hs["custom_data"]["target_view"] = {"yaw": target_yaw, "pitch": 0}
 
     return scenes
 
@@ -433,6 +508,239 @@ def scenes_to_tour_plan(title: str, scenes: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+SINGLE_CALL_TOUR_SYSTEM_PROMPT = """You are an expert Matterport-style 360 tour builder.
+You receive all panorama images for one property in a single request. Build one connected
+tour.json plan from the pixels, not from filenames. Return strict JSON only.
+
+Coordinate convention:
+- yaw is degrees in [-180, 180], 0 at image center, positive to the right.
+- pitch is degrees in [-90, 90]. Navigation pucks sit on the floor inside doorways,
+  usually -25 to -40, as shallow as -12 to -20 for far open-plan passages.
+
+Rules:
+- Classify rooms from pixels. Filenames and labels are weak hints only.
+- Find traversable openings: doors, archways, passages, glass/sliding balcony doors.
+- Ignore windows, mirrors, walls, curtains, and furniture.
+- Only link to rooms that have one of the provided panorama images.
+- Make every navigation edge reciprocal. If A links to B, B must link back to A.
+- Every scene must be reachable from initial_scene_id.
+- At most one navigation hotspot per source scene and target scene.
+- Prefer entrance as the start, then living_room, then the most connected scene.
+- Write grounded real-estate metadata based on visible details.
+
+Output shape:
+{
+  "title": "tour title",
+  "generator": "spatial-ai-v1",
+  "initial_scene_id": "scene_id",
+  "scenes": [
+    {
+      "id": "stable_scene_id",
+      "image_key": "EXACT image key from the prompt",
+      "room_type": "living_room|dining_room|kitchen|bedroom|master_bedroom|bathroom|balcony|terrace|hallway|entrance|study|utility|other",
+      "title": "short room title",
+      "description": "2-4 sentence grounded room description",
+      "caption": "short caption, max 8 words",
+      "narration_script": "one spoken-style guide paragraph",
+      "order_index": 0,
+      "metadata": {"initial_view": {"yaw": 0, "pitch": 0, "zoom": 50}},
+      "hotspots": [
+        {
+          "id": "source->target",
+          "type": "navigation",
+          "target_scene_id": "target_scene_id",
+          "title": "target scene title",
+          "position": {"yaw": 0, "pitch": -30},
+          "order_index": 0,
+          "custom_data": {"auto_generated": true, "opening_type": "door|passage|open_archway|glass_sliding_door"}
+        }
+      ]
+    }
+  ]
+}
+"""
+
+
+def _build_single_call_tour_prompt(
+    panoramas: list[dict[str, Any]],
+    title: str,
+    description: str | None = None,
+) -> tuple[str, list[str]]:
+    lines = [
+        f"Requested tour title: {title}",
+        f"Property/context description: {description or 'Not provided.'}",
+        "Images. Use the exact image_key for each returned scene:",
+    ]
+    labels: list[str] = []
+    for index, pano in enumerate(panoramas, start=1):
+        key = str(pano.get("key") or f"image_{index}")
+        hint = str(pano.get("filename_hint") or pano.get("image_url") or "")
+        label = f"image_{index} image_key={key} hint={hint}"
+        labels.append(label)
+        lines.append(f"{index}. image_key={key}; weak_hint={hint}")
+    lines.append("Return one complete JSON object matching the schema. Do not include prose.")
+    return "\n".join(lines), labels
+
+
+def _stable_scene_id(room_type: str, used: set[str]) -> str:
+    base = room_type if room_type in ROOM_TYPES else "other"
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _normalize_single_call_plan(raw: dict[str, Any], panoramas: list[dict[str, Any]], fallback_title: str) -> dict[str, Any]:
+    if isinstance(raw.get("tour"), dict):
+        raw = raw["tour"]
+    elif isinstance(raw.get("tour_json"), dict):
+        raw = raw["tour_json"]
+
+    image_by_key = {str(p.get("key")): p for p in panoramas}
+    used_ids: set[str] = set()
+    scenes: list[dict[str, Any]] = []
+
+    for index, scene in enumerate(raw.get("scenes") or []):
+        if not isinstance(scene, dict):
+            continue
+        image_key = str(scene.get("image_key") or scene.get("key") or "")
+        if image_key not in image_by_key:
+            # Gemini sometimes preserves scene order but omits the exact image_key.
+            # Prefer a slightly forgiving map over discarding the whole tour plan.
+            if index < len(panoramas):
+                image_key = str(panoramas[index].get("key"))
+            else:
+                continue
+        room_type = str(scene.get("room_type") or "other").strip().lower().replace(" ", "_")
+        if room_type not in ROOM_TYPES:
+            room_type = "other"
+        scene_id = str(scene.get("id") or "").strip().lower().replace(" ", "_")
+        if not scene_id or scene_id in used_ids:
+            scene_id = _stable_scene_id(room_type, used_ids)
+        else:
+            used_ids.add(scene_id)
+        metadata = scene.get("metadata") if isinstance(scene.get("metadata"), dict) else {}
+        initial_view = metadata.get("initial_view") if isinstance(metadata.get("initial_view"), dict) else {}
+        yaw = float(initial_view.get("yaw") or 0)
+        scenes.append(
+            {
+                "id": scene_id,
+                "image_key": image_key,
+                "room_type": room_type,
+                "title": str(scene.get("title") or _title_from_type(room_type)).strip(),
+                "description": str(scene.get("description") or "").strip() or None,
+                "caption": str(scene.get("caption") or "").strip() or None,
+                "narration_script": str(scene.get("narration_script") or "").strip() or None,
+                "image_url": image_by_key[image_key].get("image_url"),
+                "order_index": int(scene.get("order_index") if scene.get("order_index") is not None else index),
+                "metadata": {"initial_view": {"yaw": max(-180, min(180, yaw)), "pitch": 0, "zoom": 50}},
+                "hotspots": scene.get("hotspots") if isinstance(scene.get("hotspots"), list) else [],
+            }
+        )
+
+    valid_ids = {s["id"] for s in scenes}
+    titles = {s["id"]: s["title"] for s in scenes}
+    for scene in scenes:
+        clean_hotspots: list[dict[str, Any]] = []
+        seen_targets: set[str] = set()
+        for hs in scene.get("hotspots", []):
+            if not isinstance(hs, dict):
+                continue
+            target = str(hs.get("target_scene_id") or "")
+            if target not in valid_ids or target == scene["id"] or target in seen_targets:
+                continue
+            seen_targets.add(target)
+            position = hs.get("position") if isinstance(hs.get("position"), dict) else {}
+            yaw = max(-180, min(180, float(position.get("yaw") or 0)))
+            pitch = max(NAV_PITCH_MIN, min(NAV_PITCH_MAX, float(position.get("pitch") or NAV_PITCH_DEFAULT)))
+            custom_data = hs.get("custom_data") if isinstance(hs.get("custom_data"), dict) else {}
+            clean_hotspots.append(
+                {
+                    "id": f"{scene['id']}->{target}",
+                    "type": "navigation",
+                    "target_scene_id": target,
+                    "title": str(hs.get("title") or titles.get(target) or "Go here"),
+                    "position": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
+                    "order_index": len(clean_hotspots),
+                    "custom_data": {
+                        "auto_generated": True,
+                        "opening_type": custom_data.get("opening_type") or "door",
+                    },
+                }
+            )
+        scene["hotspots"] = clean_hotspots
+
+    by_id = {s["id"]: s for s in scenes}
+    for scene in scenes:
+        for hs in list(scene["hotspots"]):
+            target = by_id[hs["target_scene_id"]]
+            if any(back["target_scene_id"] == scene["id"] for back in target["hotspots"]):
+                continue
+            target["hotspots"].append(
+                {
+                    "id": f"{target['id']}->{scene['id']}",
+                    "type": "navigation",
+                    "target_scene_id": scene["id"],
+                    "title": scene["title"],
+                    "position": {"yaw": 0, "pitch": NAV_PITCH_DEFAULT},
+                    "order_index": len(target["hotspots"]),
+                    "custom_data": {"auto_generated": True, "opening_type": "door"},
+                }
+            )
+
+    for scene in scenes:
+        for hs in scene["hotspots"]:
+            target = by_id.get(hs["target_scene_id"])
+            if not target:
+                continue
+            reciprocal = next((h for h in target["hotspots"] if h["target_scene_id"] == scene["id"]), None)
+            if reciprocal:
+                target_yaw = (reciprocal["position"]["yaw"] + 180) % 360
+                if target_yaw > 180:
+                    target_yaw -= 360
+                hs["custom_data"]["target_view"] = {"yaw": round(target_yaw, 1), "pitch": 0}
+
+    initial = str(raw.get("initial_scene_id") or "")
+    if initial not in valid_ids and scenes:
+        initial = start_scene_id([{**s, "facing_yaw": s["metadata"]["initial_view"]["yaw"]} for s in scenes])
+
+    return {
+        "title": str(raw.get("title") or fallback_title),
+        "generator": "spatial-ai-v1",
+        "initial_scene_id": initial,
+        "scenes": sorted(scenes, key=lambda s: s["order_index"]),
+    }
+
+
+async def build_spatial_tour_single_call(
+    panoramas: list[dict[str, Any]],
+    provider: Any,
+    title: str = "Virtual Tour",
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Build a complete tour plan with one multi-image vision call when supported."""
+    if not hasattr(provider, "complete_json_multi_vision"):
+        return await build_spatial_tour(panoramas, provider, title=title)
+
+    prompt, labels = _build_single_call_tour_prompt(panoramas, title, description)
+    messages = [
+        AIMessage(role=AIRole.SYSTEM, content=SINGLE_CALL_TOUR_SYSTEM_PROMPT),
+        AIMessage(role=AIRole.USER, content=prompt),
+    ]
+    vision_inputs = [
+        VisionInput(image_base64=p["image_base64"], mime_type=p.get("mime_type", "image/jpeg"))
+        for p in panoramas
+    ]
+    raw = await provider.complete_json_multi_vision(messages, vision_inputs, image_labels=labels)
+    plan = _normalize_single_call_plan(raw, panoramas, title)
+    if not plan["scenes"]:
+        raise RuntimeError("spatial: single-call planner returned no usable scenes")
+    return plan
+
+
 async def analyze_and_build_scenes(
     panoramas: list[dict[str, Any]],
     provider: Any,
@@ -514,6 +822,7 @@ __all__ = [
     "assign_scene_ids",
     "build_graph",
     "build_spatial_tour",
+    "build_spatial_tour_single_call",
     "scenes_to_tour_plan",
     "start_scene_id",
     "tour_plan_summary",

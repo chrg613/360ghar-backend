@@ -31,8 +31,10 @@ AI_MAX_RETRIES = 3
 AI_RETRY_MIN_WAIT = 2  # seconds
 AI_RETRY_MAX_WAIT = 8  # seconds
 
-# HTTP status codes that are transient and worth retrying
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+# HTTP status codes that are transient and worth retrying.
+# 429 is intentionally NOT retried here: free-tier quota exhaustion is sticky,
+# and retrying amplifies RESOURCE_EXHAUSTED failures across the tour pipeline.
+_RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
 
 
 def _is_retryable_error(exc: BaseException) -> bool:

@@ -14,10 +14,12 @@ continue to work unchanged.
 from .background import (
     _run_tour_generation,
     _run_tour_optimization,
+    analyze_floor_plan_ai,
     apply_hotspot_suggestions,
     apply_scene_analysis,
     generate_tour,
     optimize_tour,
+    spatial_connect_existing_tour,
 )
 from .helpers import (
     _AI_TASK_SEMAPHORE,
@@ -108,4 +110,6 @@ __all__ = [
     "optimize_tour",
     "_run_tour_generation",
     "_run_tour_optimization",
+    "spatial_connect_existing_tour",
+    "analyze_floor_plan_ai",
 ]

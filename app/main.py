@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 import sentry_sdk
 import sentry_sdk.integrations.fastapi
@@ -9,6 +10,7 @@ import sentry_sdk.integrations.sqlalchemy
 import yaml  # type: ignore[import-untyped]
 from dotenv import load_dotenv
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sqlalchemy import text
 
@@ -65,6 +67,12 @@ else:
 
 # Create app using factory
 app = create_app()
+
+# Mount local uploads directory (used by LocalStorageService fallback when
+# Cloudinary credentials are not configured). Creates the folder if absent.
+_uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 
 @app.get("/")

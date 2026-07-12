@@ -23,14 +23,15 @@ from app.core.exceptions import ServiceUnavailableException
 from app.core.logging import get_logger
 from app.models.enums import HotspotType
 from app.models.tours import Hotspot, Tour
-from app.services.ai import AIMessage, AIProviderError, VisionInput, get_ai_provider
+from app.core.constants import DEFAULT_VISION_PROVIDER
+from app.services.ai import AIMessage, AIProviderError, VisionInput, get_ai_provider, AIProviderType
 
 logger = get_logger(__name__)
 
-# Retry configuration
+# Retry configuration — keep short to avoid 429 cascade storms on free-tier quota.
 MAX_RETRIES = 3
 MIN_WAIT_SECONDS = 2
-MAX_WAIT_SECONDS = 30
+MAX_WAIT_SECONDS = 20
 
 # Limit concurrent background AI tasks to avoid starving PgBouncer connections.
 _AI_TASK_SEMAPHORE = asyncio.Semaphore(5)
@@ -255,7 +256,7 @@ async def _download_image_as_base64(url: str) -> tuple[str, str]:
 async def _get_ai_provider_safe():
     """Get AI provider with error handling."""
     try:
-        return get_ai_provider()
+        return get_ai_provider(AIProviderType(DEFAULT_VISION_PROVIDER))
     except ValueError as e:
         logger.error("Failed to get AI provider: %s", e)
         raise ServiceUnavailableException(
