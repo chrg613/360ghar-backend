@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
 
 from app.models.enums import HotspotType, TourStatus, TourVisibility
 
@@ -288,6 +288,19 @@ class Tour(TourBase):
     deleted_at: datetime | None = None
     scenes: list[Scene] | None = None
     scene_count: int | None = None
+
+    @computed_field
+    def share_url(self) -> str | None:
+        from app.config import settings
+        base = settings.PUBLIC_APP_URL or "https://360viewer.360ghar.com"
+        return f"{base}/view/{self.id}"
+
+    @computed_field
+    def embed_code(self) -> str | None:
+        from app.config import settings
+        base = settings.PUBLIC_APP_URL or "https://360viewer.360ghar.com"
+        url = f"{base}/embed/{self.id}?autoplay=true&navbar=true&fullscreen=true&vr=true"
+        return f'<iframe src="{url}" width="100%" height="500px" frameborder="0" allow="fullscreen; xr-spatial-tracking; accelerometer; gyroscope" allowfullscreen loading="lazy" style="border: none; border-radius: 8px;"></iframe>'
 
     model_config = ConfigDict(from_attributes=True)
 

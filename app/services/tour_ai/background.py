@@ -541,13 +541,32 @@ async def _apply_spatial_tour_plan(
         created = await _apply_spatial_navigation(db, tour, provider, apply_to_scenes=apply_to_scenes)
         return created, []
 
+    # Use Daytona sandbox if requested in environment or options
+    # We will pass the skill_content directly to the sandbox
+    from app.config import settings
+    use_sandbox = getattr(settings, "USE_DAYTONA_SANDBOX", False)
+    
     try:
-        plan = await build_spatial_tour_single_call(
-            panoramas,
-            provider,
-            title=fallback_title,
-            description=fallback_description,
-        )
+        if use_sandbox:
+            from .daytona_service import generate_tour_in_sandbox
+            import os
+            skill_path = os.path.join(os.path.dirname(__file__), "../../../../.agents/skills/build-360-tour/SKILL.md")
+            skill_content = ""
+            if os.path.exists(skill_path):
+                with open(skill_path, "r") as f:
+                    skill_content = f.read()
+            plan = await generate_tour_in_sandbox(
+                images_base64=panoramas,
+                skill_content=skill_content,
+                title=fallback_title,
+            )
+        else:
+            plan = await build_spatial_tour_single_call(
+                panoramas,
+                provider,
+                title=fallback_title,
+                description=fallback_description,
+            )
     except AIProviderError:
         # Surface quota / auth / provider failures cleanly to the job status.
         raise
