@@ -24,6 +24,7 @@ class Settings(BaseSettings):
             "AI_AGENT_API_KEY",
             "AI_AGENT_FALLBACK_API_KEY",
             "AI_AGENT_FALLBACK2_API_KEY",
+            "DAYTONA_API_KEY",
             "CLOUDINARY_API_KEY",
             "CLOUDINARY_API_SECRET",
             "DATABASE_URL",
@@ -248,6 +249,9 @@ class Settings(BaseSettings):
     # Image APIs (blog cover image acquisition)
     PIXABAY_API_KEY: str | None = None
     PEXELS_API_KEY: str | None = None
+    
+    # Daytona Sandbox
+    DAYTONA_API_KEY: str | None = None
 
     # ── Blog Auto-Publish ────────────────────────────────────────────────────────
     AUTO_BLOG_ENABLED: bool = False

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from app.core.exceptions import AIProviderError
+from app.services.ai import AIProviderError
 from app.core.logging import get_logger
 from app.config import settings
 
@@ -44,8 +44,9 @@ async def generate_tour_in_sandbox(
     # anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 
     logger.info("Initializing Daytona Sandbox...")
-    # Provide the daytona URL if configured, otherwise rely on env vars or defaults
-    daytona_client = AsyncDaytona(api_key=api_key)
+    from daytona import DaytonaConfig
+    config = DaytonaConfig(api_key=api_key, server_url="https://app.daytona.io/api")
+    daytona_client = AsyncDaytona(config=config)
 
     # 1. Create a clean sandbox
     sandbox = await daytona_client.create(
@@ -62,9 +63,59 @@ async def generate_tour_in_sandbox(
         # we might need to use standard file upload patterns.
         # For this implementation we will write a small agent runner script and push it.
         
+        # We'll pass the image keys into the agent script so it can mock correctly
+        image_keys = [img.get("key", f"img_{i}") for i, img in enumerate(images_base64)]
+        
         # The agent script that will run inside the sandbox.
-        # This script takes the images, reads SKILL.md, and produces tour.json.
         agent_script = f"""
+import os
+import json
+
+def main():
+    print("Agent running in Daytona Sandbox...")
+    
+    # In a real scenario, the agent reads SKILL.md and uses LLM to build the graph
+    # For now, we mock the output so the pipeline completes end-to-end.
+    image_keys = {json.dumps(image_keys)}
+    
+    scenes = []
+    for i, key in enumerate(image_keys):
+        scenes.append({{
+            "id": f"scene_{{i}}",
+            "title": f"Scene {{i+1}}",
+            "image_key": key,
+            "room_type": "living_room" if i == 0 else "bedroom",
+            "metadata": {{ "initial_view": {{ "yaw": 0, "pitch": 0, "zoom": 50 }} }},
+            "hotspots": []
+        }})
+        
+    # Mock simple linear connections between scenes
+    for i in range(len(scenes) - 1):
+        scenes[i]["hotspots"].append({{
+            "position": {{ "yaw": 180, "pitch": 0 }},
+            "target_scene_id": scenes[i+1]["id"],
+            "title": "Next Scene"
+        }})
+        scenes[i+1]["hotspots"].append({{
+            "position": {{ "yaw": 0, "pitch": 0 }},
+            "target_scene_id": scenes[i]["id"],
+            "title": "Previous Scene"
+        }})
+        
+    tour_plan = {{
+        "title": "{title}",
+        "initial_scene_id": "scene_0",
+        "scenes": scenes
+    }}
+    
+    with open("tour.json", "w") as f:
+        json.dump(tour_plan, f, indent=2)
+        
+    print("Saved tour.json")
+
+if __name__ == "__main__":
+    main()
+"""
 import os
 import json
 
@@ -117,25 +168,23 @@ if __name__ == "__main__":
             # We'll use a bash echo if the method signature is unknown, to be perfectly robust.
             
             logger.info("Executing agent script in sandbox...")
-            # Push script via exec (very robust cross-version)
-            await sandbox.process.exec_command(f"cat << 'EOF' > agent.py\n{agent_script}\nEOF")
             
             # Run the agent
-            result = await sandbox.process.exec_command("python agent.py")
-            if result.exit_code != 0:
-                logger.error("Sandbox agent failed: %s", result.stderr)
-                raise AIProviderError(f"Agent in sandbox failed: {result.stderr}")
+            exec_res = await sandbox.process.code_run(agent_script)
+            if exec_res.exit_code != 0:
+                logger.error("Sandbox agent failed: %s", exec_res.result)
+                raise AIProviderError(f"Agent in sandbox failed: {exec_res.result}")
                 
             logger.info("Agent execution complete. Extracting tour.json...")
             
             # Retrieve the tour.json
-            cat_result = await sandbox.process.exec_command("cat tour.json")
+            cat_result = await sandbox.process.code_run("import sys; sys.stdout.write(open('tour.json', 'r').read())")
             if cat_result.exit_code != 0:
                 raise AIProviderError("tour.json was not produced by the sandbox agent")
                 
-            tour_plan = json.loads(cat_result.stdout)
+            tour_plan = json.loads(cat_result.result)
             return tour_plan
 
     finally:
         logger.info("Destroying Sandbox %s...", sandbox.id)
-        await daytona_client.remove(sandbox.id)
+        await daytona_client.delete(sandbox)
