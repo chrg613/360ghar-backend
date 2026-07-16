@@ -47,6 +47,7 @@ dependencies = [
     "razorpay>=1.4.2",
     "daytona",
     "google-antigravity>=0.1.6",
+    "modal>=1.5.2",
 ]
 
 [project.optional-dependencies]

@@ -22,6 +22,8 @@ from app.api.api_v1.endpoints import (
     flatmates_admin,
     floor_plans,
     hotspots,
+    # 3D Splat Lab
+    lab,
     notifications,
     oauth,
     payments,
@@ -129,6 +131,9 @@ api_router.include_router(agent_chat.router, prefix="/agent", tags=["ai-agent"])
 
 # Data Hub
 api_router.include_router(data_hub.router, prefix="/data-hub", tags=["data-hub"])
+
+# 3D Splat Lab – Gaussian Splatting pipeline
+api_router.include_router(lab.router, prefix="/lab", tags=["lab"])
 
 # Webhooks (inbound integrations). The router already carries the
 # /webhooks/auth prefix, so the full path is /api/v1/webhooks/auth/...

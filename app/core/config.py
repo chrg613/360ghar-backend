@@ -33,6 +33,8 @@ class Settings(BaseSettings):
             "GOOGLE_API_KEY",
             "GOOGLE_APPLICATION_CREDENTIALS",
             "GROQ_API_KEY",
+            "MODAL_TOKEN_ID",
+            "MODAL_TOKEN_SECRET",
             "PERPLEXITY_API_KEY",
             "PEXELS_API_KEY",
             "PIXABAY_API_KEY",
@@ -250,8 +252,11 @@ class Settings(BaseSettings):
     PIXABAY_API_KEY: str | None = None
     PEXELS_API_KEY: str | None = None
     
-    # Daytona Sandbox
+    # ── 3D Splat Lab – Gaussian Splatting Pipeline ──────────────────────────────
     DAYTONA_API_KEY: str | None = None
+    SPLAT_BUCKET_NAME: str = "splat-jobs"  # Supabase Storage bucket for splat job artefacts
+    MODAL_TOKEN_ID: str | None = None
+    MODAL_TOKEN_SECRET: str | None = None
 
     # ── Blog Auto-Publish ────────────────────────────────────────────────────────
     AUTO_BLOG_ENABLED: bool = False
