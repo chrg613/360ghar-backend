@@ -226,6 +226,9 @@ def extract_multiview_frames(
     frame_prefix: str = "f",
     start_index: int = 0,
     apply_masks: bool = True,
+    face_w: int = 768,
+    face_h: int = 576,
+    equi_max_w: int = 1920,
 ) -> int:
     """
     Extract frames and, for 360 video, unwrap multiple perspective faces per frame.
@@ -236,7 +239,7 @@ def extract_multiview_frames(
     images_dir.mkdir(parents=True, exist_ok=True)
     duration = max(_probe_duration(video_path), 0.5)
     # Cap fps so we don't explode image count with many yaws
-    base_fps = min(4.0, max(0.5, target_frames / duration))
+    base_fps = min(4.0, max(0.25, target_frames / duration))
 
     tmp_equi = images_dir.parent / f"_equi_{frame_prefix}"
     if tmp_equi.exists():
@@ -248,7 +251,8 @@ def extract_multiview_frames(
     if is_360:
         # scale height to width/2 (2:1). YouTube 360 often ships 16:9 containers
         # with spherical metadata still covering full sphere → stretch vertical.
-        vf = f"fps={base_fps:.4f},scale=1920:960:flags=lanczos"
+        eh = max(equi_max_w // 2, 512)
+        vf = f"fps={base_fps:.4f},scale={equi_max_w}:{eh}:flags=lanczos"
     else:
         vf = f"fps={base_fps:.4f}"
 
@@ -356,7 +360,7 @@ def extract_multiview_frames(
                     f"v360=input=e:output=rectilinear:"
                     f"yaw={yaw}:pitch={pitch}:roll=0:"
                     f"h_fov={h_fov}:v_fov={v_fov}:"
-                    f"w=768:h=576"
+                    f"w={face_w}:h={face_h}"
                 )
                 r = subprocess.run(
                     [
@@ -638,7 +642,7 @@ def _update_job(sb, job_id: str, **fields) -> None:
     gpu="A10G",
     memory=32768,
     image=image,
-    timeout=7200,
+    timeout=14400,  # whole-house pro 360 can need long COLMAP + train
     secrets=[modal.Secret.from_name("supabase-secret")],
     volumes={"/data": vol},
 )
@@ -654,14 +658,18 @@ def train_splat(
     Main entry: download video(s), multi-view extract, COLMAP, train, export .splat.
 
     recipe:
-      - "simple": old raw path — horizon yaws only, ~20-24 equirect frames,
-        no people/mirror masks, no floor/shell polish. Matches room1_raw lineage.
+      - "simple": short-clip raw path — horizon yaws, few frames, no polish.
+      - "housetour": full pro 360 tour — denser equirect sampling, horizon yaws
+        only (no multi-pitch overload), high face res, raw export. For smooth
+        real-estate 360 masters (e.g. HouseTour-class capture).
       - "default": multi-pitch + light masks + optional cuboid polish.
     """
     from supabase import create_client
     import httpx
 
-    simple = (recipe or "default").lower() in ("simple", "raw", "old")
+    recipe_l = (recipe or "default").lower()
+    simple = recipe_l in ("simple", "raw", "old")
+    housetour = recipe_l in ("housetour", "pro", "full", "whole")
 
     sb_url = os.environ.get("SUPABASE_URL", "")
     sb_key = os.environ.get("SUPABASE_SECRET_KEY", "")
@@ -705,7 +713,8 @@ def train_splat(
                 err = f"Local volume video not found: {vp}"
                 _update_job(sb, job_id, status="failed", error_message=err)
                 return {"success": False, "error": err}
-            dest = workspace / f"video_{i}.mp4"
+            # Preserve real extension (webm/mp4) — do not force .mp4 on VP9
+            dest = workspace / f"video_{i}{src.suffix or '.mp4'}"
             shutil.copy2(src, dest)
             video_paths.append(dest)
             print(f"Using volume video: {src} -> {dest}", flush=True)
@@ -752,11 +761,25 @@ def train_splat(
         return {"success": False, "error": err}
 
     # Quality → frame / iteration budgets
-    if simple:
-        # Old raw recipe that produced recognizable room1 (geyser/AC/door)
-        target_frames_total = 22  # ~22 equirect × 6 yaws ≈ 130 views
+    # Face output size (higher for pro 4K equi masters)
+    face_w, face_h = 768, 576
+    equi_max_w = 1920
+
+    if housetour:
+        # Whole pro tour: denser path sampling, horizon-only multi-yaw
+        # 214s tour → ~55 eq frames × 6 yaws ≈ 330 views (COLMAP-friendly)
+        target_frames_total = 55
+        max_steps = 15000 if quality_preset != "fast" else 8000
+        pitches = (0,)  # proven safer than multi-pitch overload
+        yaws = DEFAULT_YAWS  # 6 × 60°
+        apply_masks = False  # pro tours rarely need person wipe
+        raw_only = True
+        face_w, face_h = 1024, 768
+        equi_max_w = 2560
+    elif simple:
+        target_frames_total = 22
         max_steps = 7000 if quality_preset != "quality" else 12000
-        pitches = (0,)  # horizon only — no multi-pitch overload
+        pitches = (0,)
         yaws = DEFAULT_YAWS
         apply_masks = False
         raw_only = True
@@ -789,8 +812,8 @@ def train_splat(
         is_360 = force_360
     print(
         f"is_360={is_360}, videos={len(video_paths)}, preset={quality_preset}, "
-        f"recipe={'simple' if simple else 'default'}, pitches={pitches}, "
-        f"target_eq_frames={target_frames_total}",
+        f"recipe={recipe_l}, pitches={pitches}, yaws={yaws}, "
+        f"target_eq_frames={target_frames_total}, face={face_w}x{face_h}",
         flush=True,
     )
 
@@ -819,9 +842,14 @@ def train_splat(
             is_360=is_360,
             yaws=yaws,
             pitches=pitches,
+            h_fov=DEFAULT_H_FOV,
+            v_fov=DEFAULT_V_FOV,
             frame_prefix=f"c{i}",
             start_index=start_index,
             apply_masks=apply_masks,
+            face_w=face_w,
+            face_h=face_h,
+            equi_max_w=equi_max_w,
         )
         total_images += n
         start_index += share + 1
