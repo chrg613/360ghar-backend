@@ -14,6 +14,7 @@ class JobCreate(BaseModel):
     title: str
     is_360_video: bool = False
     quality_preset: str = "balanced" # fast, balanced, quality
+    filenames: List[str] = ["video.mp4"]
 
 @router.post("/jobs", response_model=Any)
 async def create_job(
@@ -31,6 +32,7 @@ async def create_job(
     storage_path = f"{current_user.supabase_user_id}/{job_id}"
     
     # Create the record in Supabase
+    video_paths = ",".join([f"{storage_path}/{f}" for f in job_in.filenames])
     job_data = {
         "id": job_id,
         "user_id": str(current_user.supabase_user_id),
@@ -40,7 +42,7 @@ async def create_job(
         "stage_message": "Waiting for video upload...",
         "is_360_video": job_in.is_360_video,
         "quality_preset": job_in.quality_preset,
-        "video_path": f"{storage_path}/video.mp4"
+        "video_path": video_paths
     }
     
     # We assume you have a splat_jobs table in supabase
@@ -67,12 +69,14 @@ async def start_job(
         
     job = job_res.data[0]
     
-    # Spawn the Modal function asynchronously so we don't block the API
-    train_splat.spawn(job_id, job["video_path"], job["quality_preset"])
-    
+    # Spawn the Modal function asynchronously so we don't block the API.
+    # force_360 from job flag — multi-yaw unwrap is required for indoor GS quality.
+    force_360 = bool(job.get("is_360_video", True))
+    train_splat.spawn(job_id, job["video_path"], job["quality_preset"], None, force_360)
+
     get_supabase_service_client().table("splat_jobs").update({
         "status": "extracting",
-        "stage_message": "Starting cloud GPU pipeline...",
+        "stage_message": "Starting cloud GPU pipeline (multi-view 360 SfM)...",
         "progress": 5
     }).eq("id", job_id).execute()
     
@@ -81,17 +85,17 @@ async def start_job(
 @router.post("/jobs/{job_id}/upload-video", response_model=Any)
 async def get_upload_url(
     job_id: str,
+    filename: str,
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """
-    Get a presigned URL to upload the video.
+    Get a presigned URL to upload a video clip.
     """
     job_res = get_supabase_service_client().table("splat_jobs").select("*").eq("id", job_id).eq("user_id", str(current_user.supabase_user_id)).execute()
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    job = job_res.data[0]
-    storage_path = job["video_path"]
+    storage_path = f"{current_user.supabase_user_id}/{job_id}/{filename}"
     
     # Generate signed upload URL from Supabase
     res = get_supabase_service_client().storage.from_("splat-jobs").create_signed_upload_url(storage_path)

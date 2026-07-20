@@ -195,3 +195,15 @@ cache/
 .audit-tokens.json
 audit_results_*.json
 /tmp/360ghar-audit-*
+
+# Local splat lab datasets & one-off artifacts
+test_clips/
+uploads/tours/
+*.splat
+*.ply
+*.mp4
+*.webm
+# Modal / export one-offs
+ns_help.txt
+test.zip
+cache/

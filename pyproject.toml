@@ -48,6 +48,7 @@ dependencies = [
     "daytona",
     "google-antigravity>=0.1.6",
     "modal>=1.5.2",
+    "google-generativeai>=0.8.6",
 ]
 
 [project.optional-dependencies]

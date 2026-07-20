@@ -148,7 +148,12 @@ def extract_frames(video_path: str, output_dir: str, fps: float = 2.0) -> dict:
 # ---------------------------------------------------------------------------
 
 def convert_360_to_cubemap(frames_dir: str, output_dir: str) -> dict:
-    """Convert 360-degree equirectangular frames to 4 perspective cubemap faces."""
+    """Convert 360° equirectangular frames to multi-yaw perspective faces.
+
+    Uses 6 yaw directions (every 60°) at 90° HFOV so COLMAP gets full-room
+    coverage. Previous 4-face-only path under-constrained indoor SfM.
+    Also normalizes non-2:1 YouTube equirect containers to 2:1.
+    """
     try:
         import py360convert
         import numpy as np
@@ -164,33 +169,42 @@ def convert_360_to_cubemap(frames_dir: str, output_dir: str) -> dict:
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
-    FACES = ["F", "R", "B", "L"]  # front, right, back, left (skip top/bottom)
+    # 6 virtual cameras — better overlap for sequential matching than 4 faces
+    YAWS = [0, 60, 120, 180, 240, 300]
     converted = 0
 
     for frame_file in sorted(frames_path.glob("frame_*.jpg")):
         stem = frame_file.stem
         pil_img = Image.open(frame_file).convert("RGB")
+        # Force 2:1 equirect aspect (YouTube 360 often ships 16:9)
+        if abs((pil_img.width / max(pil_img.height, 1)) - 2.0) > 0.1:
+            target_h = max(pil_img.width // 2, 1)
+            pil_img = pil_img.resize((pil_img.width, target_h), Image.Resampling.LANCZOS)
         if pil_img.width > 2048:
             pil_img = pil_img.resize((2048, 1024), Image.Resampling.LANCZOS)
         img = np.array(pil_img)
+        # Mask nadir (camera operator) ~12%
+        cut = int(img.shape[0] * 0.12)
+        if cut > 0:
+            img[-cut:, :] = 0
         h, w = img.shape[:2]
-        face_size = w // 4  # 4096->1024, 2048->512, etc.
+        face_size = max(min(w // 3, 768), 256)
 
-        for face in FACES:
+        for yaw in YAWS:
             face_img = py360convert.e2p(
                 img,
-                fov_deg=(90, 90),
-                u_deg={"F": 0, "R": 90, "B": 180, "L": 270}[face],
-                v_deg=0,
-                out_hw=(face_size, face_size),
+                fov_deg=(90, 75),
+                u_deg=float(yaw),
+                v_deg=0.0,
+                out_hw=(face_size, int(face_size * 0.75)),
                 in_rot_deg=0,
                 mode="bilinear",
             )
-            out_file = out_path / f"{stem}_{face}.jpg"
+            out_file = out_path / f"{stem}_y{yaw:03d}.jpg"
             Image.fromarray(face_img.astype(np.uint8)).save(out_file, quality=95)
         converted += 1
 
-    return {"success": True, "frames_converted": converted, "faces_per_frame": len(FACES)}
+    return {"success": True, "frames_converted": converted, "faces_per_frame": len(YAWS)}
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +226,10 @@ def run_colmap(images_dir: str, output_dir: str, use_gpu: bool = False) -> dict:
         "--database_path", str(db),
         "--image_path", images_dir,
         "--SiftExtraction.use_gpu", gpu_flag,
-        "--SiftExtraction.max_image_size", "800",
-        "--SiftExtraction.max_num_features", "2048",
-        "--SiftExtraction.num_threads", "1",
+        # Prefer high-res features for 2K–4K equirect faces (old 800px cap hurt quality)
+        "--SiftExtraction.max_image_size", "1600",
+        "--SiftExtraction.max_num_features", "4096",
+        "--SiftExtraction.num_threads", "4",
     ]
     r = subprocess.run(cmd_extract, capture_output=True, text=True, timeout=3600)
     if r.returncode != 0:
