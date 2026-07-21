@@ -985,6 +985,126 @@ def train_splat(
     }
 
 
+@app.function(
+    gpu="A10G",
+    memory=32768,
+    image=image,
+    timeout=7200,
+    volumes={"/data": vol},
+)
+def train_splat_images(
+    job_id: str,
+    dataset_vol_path: str,
+    max_steps: int = 12000,
+    raw_only: bool = True,
+):
+    """
+    Train splatfacto from an official-style *image* dataset (images/ + transforms.json).
+
+    Skips video extract and COLMAP — poses are already in transforms.json.
+    dataset_vol_path: path under /data to either a zip or a folder with
+      images/ + transforms.json
+    """
+    import zipfile
+
+    persistent = Path(f"/data/{job_id}")
+    if persistent.exists():
+        shutil.rmtree(persistent, ignore_errors=True)
+    persistent.mkdir(parents=True, exist_ok=True)
+
+    workspace = Path("/workspace/data")
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    src = Path(dataset_vol_path)
+    if not src.is_absolute():
+        src = Path("/data") / dataset_vol_path
+    if not src.exists():
+        return {"success": False, "error": f"Dataset not found on volume: {dataset_vol_path}"}
+
+    print(f"Loading image dataset from {src}", flush=True)
+    if src.is_file() and src.suffix.lower() == ".zip":
+        with zipfile.ZipFile(src, "r") as zf:
+            zf.extractall(workspace)
+        # If zip has a single top folder, use it
+        children = [p for p in workspace.iterdir() if not p.name.startswith(".")]
+        if len(children) == 1 and children[0].is_dir():
+            # move contents up
+            inner = children[0]
+            for item in inner.iterdir():
+                shutil.move(str(item), str(workspace / item.name))
+            inner.rmdir()
+    elif src.is_dir():
+        for item in src.iterdir():
+            dest = workspace / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+    else:
+        return {"success": False, "error": f"Unsupported dataset path: {src}"}
+
+    tj = workspace / "transforms.json"
+    images = workspace / "images"
+    if not tj.exists() or not images.is_dir():
+        return {
+            "success": False,
+            "error": f"Need images/ + transforms.json under dataset (got: {list(workspace.iterdir())})",
+        }
+
+    n_img = sum(1 for p in images.iterdir() if p.is_file())
+    print(f"Dataset OK: {n_img} images, transforms.json present", flush=True)
+    if n_img < 8:
+        return {"success": False, "error": f"Too few images ({n_img})"}
+
+    # Checkpoint source on volume
+    src_ckpt = persistent / "dataset"
+    if src_ckpt.exists():
+        shutil.rmtree(src_ckpt)
+    shutil.copytree(workspace, src_ckpt)
+    vol.commit()
+
+    output_dir = Path("/workspace/outputs")
+    try:
+        config_yml = train_splatfacto(workspace, output_dir, max_steps)
+    except Exception as e:
+        err = f"Training failed: {e}"
+        print(err, flush=True)
+        return {"success": False, "error": err}
+
+    out_ckpt = persistent / "outputs"
+    if out_ckpt.exists():
+        shutil.rmtree(out_ckpt)
+    shutil.copytree(output_dir, out_ckpt)
+    vol.commit()
+
+    try:
+        splat_path = export_ply_to_splat(config_yml, workspace, raw_only=raw_only)
+    except Exception as e:
+        err = f"Export failed: {e}"
+        print(err, flush=True)
+        return {"success": False, "error": err}
+
+    splat_vol = persistent / "splat.splat"
+    shutil.copy2(splat_path, splat_vol)
+    # also keep raw if present
+    raw = workspace / "splat_raw.splat"
+    if raw.exists():
+        shutil.copy2(raw, persistent / "splat_raw.splat")
+    vol.commit()
+    print(f"Saved {splat_vol} ({splat_vol.stat().st_size / 1e6:.2f} MB)", flush=True)
+
+    return {
+        "success": True,
+        "volume_path": str(splat_vol),
+        "bytes": splat_vol.stat().st_size,
+        "images": n_img,
+        "max_steps": max_steps,
+        "gaussians_est": splat_vol.stat().st_size // 32,
+    }
+
+
 @app.function(image=image, volumes={"/data": vol}, timeout=600)
 def upload_to_volume(remote_path: str, data: bytes) -> str:
     path = Path("/data") / remote_path

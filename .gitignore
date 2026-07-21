@@ -207,3 +207,14 @@ uploads/tours/
 ns_help.txt
 test.zip
 cache/
+
+# Local GS datasets / Modal artifacts (large)
+data/nerfstudio_images/kitchen_ready/
+data/nerfstudio_images/**/images/
+data/nerfstudio_images/**/*.zip
+data/nerfstudio_images/**/*.splat
+data/nerfstudio_images/**/*.ply
+data/nerfstudio_images/**/*.npy
+data/nerfstudio_images/**/*.ckpt
+data/.venv_dl/
+data/**/_hf/
